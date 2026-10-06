@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: ./backend
+    network_mode: host
+    environment:
+      - TZ=Asia/Yekaterinburg
+    env_file:
+      - ./backend/.env
+    volumes:
+      # Настройки (пароли ИАС-4 и ЕЦП) и история запросов должны переживать
+      # пересборку контейнера, иначе они исчезают при каждом docker compose up.
+      - ./backend/data:/app/app/data
+      # XML-выгрузки справочников ТФОМС: SPSMO.zip, SPMO.zip, SPFMODIVISION.zip.
+      # Read-only: приложение только читает их.
+      - ./tfoms:/app/tfoms:ro
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3001:80"
+    extra_hosts:
+      - "backend:host-gateway"
+    depends_on:
+      - backend
+    restart: unless-stopped

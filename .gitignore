@@ -1,0 +1,54 @@
+# Секреты: реальные .env не в репозитории, только шаблоны *.env.example
+*.env
+!*.env.example
+!.env.example
+
+# Локальные базы: пароли ИАС-4, учётные данные ЕЦП, история прикреплений,
+# кэш справочников. Живут в ./backend/data (volume), переносятся при развёртывании.
+backend/data/
+backend/app/settings.db
+backend/app/prk_history.db
+backend/app/dictionaries.db
+backend/_backup_*/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+.vite/
+
+# Артефакты сборки и проверок
+dist/
+deploy/dist/
+*.png
+*.jpg
+.playwright-mcp/
+test-results/
+
+# Выгрузки справочников ТФОМС — большие файлы, копируются при развёртывании
+tfoms/
+*.zip
+
+# Артефакты разбора SOAP и IDE
+prk_*.txt
+*.asc
+ReplySCD.xml
+.gigaide/
+frontend/tsconfig.tsbuildinfo
+mis_integration/openapi.json
+
+# OS и редакторы
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

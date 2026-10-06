@@ -1,0 +1,12 @@
+# SQLite-базы переживают пересборку только через volume; в образ они не нужны
+data/
+app/settings.db
+app/prk_history.db
+_backup_*/
+__pycache__/
+**/__pycache__/
+*.pyc
+.idea/
+.gigacode/
+.gigaide/
+# Выгрузки ТФОМС (5,5 МБ) копируются в развёртывание из deploy/tfoms
