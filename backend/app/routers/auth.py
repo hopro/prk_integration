@@ -1,5 +1,9 @@
 import logging
+import socket
+import time
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -96,3 +100,87 @@ async def update_mis_config(payload: MisConfigPayload):
     settings_db.save_settings({"ecpUrl": result.get("baseUrl", base_url)})
     logger.info("ECP base URL saved and pushed to gateway: %s", result.get("baseUrl"))
     return {"success": True, "data": result}
+
+
+@router.get("/gateway-health")
+async def gateway_health():
+    """Проверка связи backend → шлюз ЕЦП с разбором по шагам.
+
+    Нужна, когда в логах «шлюз недоступен»: показывает, на каком шаге связь
+    рвётся — имя не разрешается, порт не слушается или отвечает шлюз.
+    Не обращается к ЕЦП и ничего не меняет.
+    """
+    url = mis_client.MIS_GATEWAY_URL
+    parsed = urlparse(url)
+    host = parsed.hostname or url
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+    report: dict = {
+        "gatewayUrl": url,
+        "host": host,
+        "port": port,
+        "steps": {},
+    }
+
+    started = time.monotonic()
+    try:
+        addresses = sorted({ai[4][0] for ai in socket.getaddrinfo(host, port)})
+        report["steps"]["resolve"] = {"ok": True, "addresses": addresses}
+    except OSError as e:
+        report["steps"]["resolve"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        report["ok"] = False
+        report["hint"] = (
+            "Имя шлюза не разрешается. Внутри сети compose адрес шлюза — "
+            "http://gateway:8010. Проверьте, что сервис называется gateway и запущен."
+        )
+        return report
+
+    started = time.monotonic()
+    try:
+        with socket.create_connection((host, port), timeout=5.0):
+            report["steps"]["tcp"] = {
+                "ok": True,
+                "ms": round((time.monotonic() - started) * 1000),
+            }
+    except OSError as e:
+        report["steps"]["tcp"] = {
+            "ok": False,
+            "error": f"{type(e).__name__}: {e}",
+            "ms": round((time.monotonic() - started) * 1000),
+        }
+        report["ok"] = False
+        report["hint"] = (
+            f"Порт {port} на {host} не принимает соединения. Проверьте, что контейнер "
+            "шлюза запущен (`docker compose ps gateway`) и слушает 0.0.0.0, а не "
+            "127.0.0.1. Если имя разрешается во внешний адрес — отключите dns_search "
+            "или укажите MIS_GATEWAY_URL с IP-адресом контейнера шлюза."
+        )
+        return report
+
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0), verify=False
+        ) as client:
+            resp = await client.get(f"{url}/health")
+        report["steps"]["health"] = {
+            "ok": resp.status_code == 200,
+            "status": resp.status_code,
+            "ms": round((time.monotonic() - started) * 1000),
+        }
+    except Exception as e:  # noqa: BLE001 — здесь нужен факт, а не тип
+        report["steps"]["health"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        report["ok"] = False
+        report["hint"] = f"Шлюз не ответил на /health: {type(e).__name__}: {e}"
+        return report
+
+    try:
+        status = await mis_client.get_credentials_status()
+        report["steps"]["login"] = {"ok": True, "credentials": status}
+        report["ok"] = True
+    except Exception as e:  # noqa: BLE001
+        report["steps"]["login"] = {"ok": False, "error": str(e) or type(e).__name__}
+        report["ok"] = False
+        report["hint"] = "Шлюз отвечает, но вход не удался: " + (str(e) or type(e).__name__)
+
+    return report

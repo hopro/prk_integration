@@ -59,6 +59,7 @@ STATIC_CHECKS = [
     ("GET", "/api/settings?includeMisStatus=true", None),
     ("GET", "/api/v1/auth/mis-credentials", None),
     ("GET", "/api/v1/auth/mis-config", None),
+    ("GET", "/api/v1/auth/gateway-health", None),
     ("GET", "/api/dict", None),
     ("GET", "/api/dict/spdept", None),
     ("GET", "/api/dict/spdept?search=ФАП", None),

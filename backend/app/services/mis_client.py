@@ -1,6 +1,9 @@
+import asyncio
 import os
 import logging
+import socket
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -22,20 +25,109 @@ def invalidate_token():
     _token = None
 
 
-async def _login() -> str:
-    global _token
-    async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
-        resp = await client.post(
+async def _login_once() -> httpx.Response:
+    """Одна попытка входа в шлюз. Сетевые ошибки пробрасываются вызывающему."""
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0, connect=5.0), verify=False
+    ) as client:
+        return await client.post(
             f"{MIS_GATEWAY_URL}/api/v1/auth/login",
             json={"login": GATEWAY_LOGIN, "password": GATEWAY_PASSWORD},
         )
-        resp.raise_for_status()
-        data = resp.json()
-        _token = data.get("access_token") or data.get("data", {}).get("access_token")
-        if not _token:
-            raise RuntimeError(f"Login failed: {data}")
-        logger.info("MIS gateway login OK")
-        return _token
+
+
+def describe_unreachable(exc: Exception) -> str:
+    """Человеческое объяснение, почему шлюз ЕЦП недоступен.
+
+    httpx.connect-timeout приходит с пустым текстом, поэтому в сообщении
+    пользователь видел только «Шлюз не принял адрес ЕЦП: ». Здесь собираем
+    всё, что нужно для диагностики: адрес, куда шли, что именно сломалось
+    и что проверить.
+    """
+    host = urlparse(MIS_GATEWAY_URL).hostname or MIS_GATEWAY_URL
+    try:
+        addresses = sorted({ai[4][0] for ai in socket.getaddrinfo(host, None)})
+    except OSError:
+        addresses = []
+
+    reason = str(exc).strip()
+    kind = type(exc).__name__
+
+    if isinstance(exc, httpx.ConnectTimeout):
+        what = (
+            f"{host} не отвечает на подключение по истечении таймаута "
+            f"(проверено {LOGIN_ATTEMPTS} раз). Если DNS разрешает имя, но TCP-пакеты "
+            "уходят в никуда — значит имя попало во внешний DNS через поисковый домен "
+            "хоста."
+            if addresses
+            else f"{host} не отвечает на подключение (проверено {LOGIN_ATTEMPTS} раз)."
+        )
+        hint = (
+            "Проверьте, что контейнер шлюза запущен и виден в той же сети compose "
+            "(`docker compose ps`), а также что MIS_GATEWAY_URL указывает на имя "
+            "сервиса gateway, а не на localhost. Если имя разрешается во внешний "
+            "адрес — отключите dns_search или укажите MIS_GATEWAY_URL с IP-адресом "
+            "контейнера шлюза. Частая причина — фильтрация на сетевом экране."
+        )
+    elif isinstance(exc, httpx.ConnectError) and addresses:
+        what = f"соединение с {host} отклонено, хотя имя разрешается в {', '.join(addresses)}."
+        hint = (
+            "Контейнер шлюза не слушает порт 8010 или не запущен. Проверьте "
+            "`docker compose logs gateway` и `docker compose ps gateway`."
+        )
+    elif isinstance(exc, httpx.ConnectError):
+        what = f"не удалось подключиться к {host}."
+        hint = (
+            "Имя шлюза не разрешается. Внутри сети compose адрес шлюза — "
+            "`http://gateway:8010`. Проверьте, что сервис называется gateway."
+        )
+    else:
+        what = reason or f"не удалось подключиться к {host} ({kind})."
+        hint = "Проверьте доступность шлюза ЕЦП."
+
+    where = f" ({', '.join(addresses)})" if addresses else ""
+    return f"Шлюз ЕЦП недоступен по адресу {MIS_GATEWAY_URL}{where}: {what} {hint}"
+
+
+# Шлюз поднимается вместе с backend, но Postgres и Redis внутри него стартуют
+# дольше. Пока шлюз не готов, вход повторяем — иначе первое же обращение к ЕЦП
+# падает с ConnectTimeout, хотя через минуту всё работает.
+LOGIN_ATTEMPTS = 6
+LOGIN_BACKOFF_SEC = 2.0
+
+
+async def _login() -> str:
+    global _token
+    last: Exception | None = None
+    for attempt in range(1, LOGIN_ATTEMPTS + 1):
+        try:
+            resp = await _login_once()
+        except httpx.RequestError as e:
+            last = e
+            if attempt < LOGIN_ATTEMPTS:
+                logger.warning(
+                    "MIS gateway unreachable (attempt %s/%s): %s",
+                    attempt, LOGIN_ATTEMPTS, type(e).__name__,
+                )
+                await asyncio.sleep(LOGIN_BACKOFF_SEC)
+                continue
+            message = describe_unreachable(e)
+            logger.error("MIS gateway login failed after %s attempts: %s", LOGIN_ATTEMPTS, message)
+            raise RuntimeError(message) from e
+        break
+    else:  # pragma: no cover — защита на случай, пока цикл не отработал
+        raise RuntimeError(describe_unreachable(last) if last else "Шлюз ЕЦП недоступен")
+
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"Шлюз ЕЦП отклонил вход ({resp.status_code}): {_body_excerpt(resp.text)}"
+        )
+    data = resp.json()
+    _token = data.get("access_token") or data.get("data", {}).get("access_token")
+    if not _token:
+        raise RuntimeError(f"Шлюз ЕЦП не вернул токен: {_body_excerpt(str(data))}")
+    logger.info("MIS gateway login OK")
+    return _token
 
 
 def _body_excerpt(text: str, limit: int = 300) -> str:
@@ -86,14 +178,28 @@ async def _request(method: str, path: str, **kwargs) -> dict[str, Any]:
     headers = kwargs.pop("headers", {})
     headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
-        resp = await client.request(method, f"{MIS_GATEWAY_URL}{path}", headers=headers, **kwargs)
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=5.0), verify=False
+        ) as client:
+            resp = await client.request(
+                method, f"{MIS_GATEWAY_URL}{path}", headers=headers, **kwargs
+            )
+    except httpx.RequestError as e:
+        raise RuntimeError(describe_unreachable(e)) from e
 
     if resp.status_code == 401:
         token = await _login()
         headers["Authorization"] = f"Bearer {token}"
-        async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
-            resp = await client.request(method, f"{MIS_GATEWAY_URL}{path}", headers=headers, **kwargs)
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0, connect=5.0), verify=False
+            ) as client:
+                resp = await client.request(
+                    method, f"{MIS_GATEWAY_URL}{path}", headers=headers, **kwargs
+                )
+        except httpx.RequestError as e:
+            raise RuntimeError(describe_unreachable(e)) from e
 
     # Тело 502-ответа возвращаем как есть: так сообщение об ошибке от ЕЦП
     # доходит до пользователя, а не теряется внутри raise_for_status.

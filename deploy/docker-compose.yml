@@ -11,8 +11,9 @@
 # Перед первым запуском:
 #   1. cp .env.example .env
 #   2. отредактировать .env (пароли БД, JWT-ключ, GATEWAY_LOGIN/PASSWORD)
-#   3. положить выгрузки ТФОМС в ./tfoms:
+#   3. положить выгрузки в ./tfoms:
 #        SPSMO.zip  SPMO.zip  SPFMODIVISION.zip
+#        SPDEPT.xml — обязателен, это коды подразделений для поля podr
 # ---------------------------------------------------------------------------
 
 name: prk
@@ -28,6 +29,8 @@ services:
       POSTGRES_PASSWORD: ${GATEWAY_DB_PASSWORD:?задайте GATEWAY_DB_PASSWORD в .env}
     volumes:
       - gateway_pg:/var/lib/postgresql/data
+    networks:
+      - gateway_data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${GATEWAY_DB_USER:-mis_gateway} -d ${GATEWAY_DB_NAME:-mis_gateway}"]
       interval: 5s
@@ -40,6 +43,8 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - gateway_redis:/data
+    networks:
+      - gateway_data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -81,6 +86,9 @@ services:
         condition: service_healthy
       gateway-redis:
         condition: service_healthy
+    networks:
+      - app
+      - gateway_data
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/health').status==200 else 1)\""]
       interval: 10s
@@ -117,9 +125,14 @@ services:
       - ./data:/app/app/data
       # XML-выгрузки справочников ТФОМС: SPSMO.zip, SPMO.zip, SPFMODIVISION.zip.
       - ./tfoms:/app/tfoms:ro
+    # Backend ходит в шлюз по имени сервиса `gateway`. Если шлюз не поднялся,
+    # имя не разрешается, и любое обращение к ЕЦП падает с ConnectTimeout.
+    # Поэтому ждём, пока шлюз станет healthy.
     depends_on:
       gateway:
         condition: service_healthy
+    networks:
+      - app
 
   # ------------------------------------------------------------ интерфейс
   frontend:
@@ -131,6 +144,20 @@ services:
       - "${APP_PORT:-3001}:80"
     depends_on:
       - backend
+    networks:
+      - app
+
+networks:
+  # Сеть приложения: frontend, backend, шлюз. Имена сервисов в ней и есть
+  # адреса друг друга, поэтому backend обращается к шлюзу как к `gateway:8010`.
+  app:
+    name: prk_app
+
+  # Сеть данных шлюза. internal: true — у баз нет выхода в интернет и они
+  # недоступны извне; в эту сеть подключён только шлюз.
+  gateway_data:
+    name: prk_gateway_data
+    internal: true
 
 volumes:
   gateway_pg:
