@@ -25,13 +25,79 @@ def invalidate_token():
     _token = None
 
 
+# Метка, которую возвращает /health нашего шлюза. Если её нет — по адресу
+# отвечает другая программа: у заказчика на настроенный адрес приходил
+# 404 {"detail":"Not Found"}, и backend не мог понять, что подключился не туда.
+GATEWAY_HEALTH = "/health"
+GATEWAY_SERVICE = "mis-gateway"
+LOGIN_ROUTE = "/api/v1/auth/login"
+
+
+async def probe_gateway() -> dict[str, Any]:
+    """Отвечает ли по MIS_GATEWAY_URL именно наш шлюз.
+
+    Возвращает признак is_gateway и короткое объяснение. Ничего не меняет.
+    """
+    result: dict[str, Any] = {"url": MIS_GATEWAY_URL, "isGateway": False}
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0), verify=False
+        ) as client:
+            resp = await client.get(f"{MIS_GATEWAY_URL}{GATEWAY_HEALTH}")
+    except httpx.RequestError as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+        result["reason"] = describe_unreachable(e)
+        return result
+
+    result["healthStatus"] = resp.status_code
+    service = None
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            service = body.get("service")
+    except Exception:
+        pass
+    if service:
+        result["service"] = service
+
+    # Второй признак, не зависящий от версии шлюза: наш маршрут входа
+    # отвечает 401 или 422, а чужое приложение — 404.
+    login_status = None
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0), verify=False
+        ) as client:
+            probe_login = await client.post(
+                f"{MIS_GATEWAY_URL}{LOGIN_ROUTE}", json={}
+            )
+        login_status = probe_login.status_code
+    except httpx.RequestError as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+        result["reason"] = describe_unreachable(e)
+        return result
+    result["loginStatus"] = login_status
+
+    marked = service == GATEWAY_SERVICE
+    has_route = login_status not in (None, 404, 405)
+    result["isGateway"] = marked or has_route
+    result["byMarker"] = marked
+
+    if not result["isGateway"]:
+        result["reason"] = (
+            f"По адресу {MIS_GATEWAY_URL} отвечает не наш шлюз: на /health — "
+            f"{resp.status_code}, на {LOGIN_ROUTE} — {login_status}. "
+            f"Проверьте MIS_GATEWAY_URL: по этому адресу слушает другая программа."
+        )
+    return result
+
+
 async def _login_once() -> httpx.Response:
     """Одна попытка входа в шлюз. Сетевые ошибки пробрасываются вызывающему."""
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(15.0, connect=5.0), verify=False
     ) as client:
         return await client.post(
-            f"{MIS_GATEWAY_URL}/api/v1/auth/login",
+            f"{MIS_GATEWAY_URL}{LOGIN_ROUTE}",
             json={"login": GATEWAY_LOGIN, "password": GATEWAY_PASSWORD},
         )
 
@@ -118,6 +184,12 @@ async def _login() -> str:
     else:  # pragma: no cover — защита на случай, пока цикл не отработал
         raise RuntimeError(describe_unreachable(last) if last else "Шлюз ЕЦП недоступен")
 
+    if resp.status_code in (404, 405):
+        probe = await probe_gateway()
+        raise RuntimeError(probe.get("reason") or (
+            f"По адресу {MIS_GATEWAY_URL} нет шлюза ЕЦП "
+            f"({resp.status_code} на /api/v1/auth/login)."
+        ))
     if resp.status_code >= 400:
         raise RuntimeError(
             f"Шлюз ЕЦП отклонил вход ({resp.status_code}): {_body_excerpt(resp.text)}"

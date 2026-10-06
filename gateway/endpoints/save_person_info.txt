@@ -1,0 +1,23 @@
+curl 'https://ecp.mis66.ru/?c=PersonCard&m=savePersonCard' \
+  --compressed \
+  -X POST \
+  -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0' \
+  -H 'Accept: */*' \
+  -H 'Accept-Language: ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3' \
+  -H 'Accept-Encoding: gzip, deflate, br, zstd' \
+  -H 'X-Requested-With: XMLHttpRequest' \
+  -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' \
+  -H 'Origin: https://ecp.mis66.ru' \
+  -H 'DNT: 1' \
+  -H 'Sec-GPC: 1' \
+  -H 'Connection: keep-alive' \
+  -H 'Referer: https://ecp.mis66.ru/?c=promed' \
+  -H 'Cookie: PHPSESSID=nqvcjb99mfgm5f3duggde25spt; csrfToken=495eef6d8dadd66bc4715943e5dd2e2e617dfa03f20d861b14cf0b6d829b1439; route=f097b6c1dad255b0dac4761990b68d0c; login=adm_glinnik; JSESSIONID=3B305E6F19787932B268FCF8F75D58EE' \
+  -H 'Sec-Fetch-Dest: empty' \
+  -H 'Sec-Fetch-Mode: cors' \
+  -H 'Sec-Fetch-Site: same-origin' \
+  -H 'TE: trailers' \
+  --data-raw 'accessType=edit&PersonCard_id=660101000482453&PersonCardEnd_insDT=23.07.2025&PersonCardAttach_id=660101000236849&PersonCardAttach_setDate=2025-07-23&PersonAmbulatCard_id=660101000263198&PersonCard_IsAttachCondit=1&Person_id=660910003025830&idDecl=0&NDecl=0&Server_id=13003795&user_id=&PersonCardAttach_OrderNumber=&PersonCard_Code=660910000587908&LpuRegion_id=3154&LpuRegion_Fapid=&LpuAttachType_id=1&PersonCard_DmsPolisNum=&PersonCard_DmsBegDate=&PersonCard_DmsEndDate=&PersonCard_begDate=23.07.2025&PersonCard_endDate=&CaserIn_id=&idmu=&Lpu_id=13003795&LpuRegionType_id=1&PersonCardAttach=on&PersonCardMedicalIntervent=&isPersonCardAttach=1&PersonAge=41&Person_Birthday=06.06.1985&lastAttachIsNotInOurLpu=false&isPersonCardMedicalIntervent=0&PersonCardMedicalInterventData=%5B%5D&action=edit&allowEditLpuRegion=0&getPersonsActualConsents=true&confirmBegDate=true&accessType=edit&PersonCard_id=660101000482453&PersonCardEnd_insDT=23.07.2025&PersonCardAttach_id=660101000236849&PersonCardAttach_setDate=2025-07-23&PersonAmbulatCard_id=660101000263198&PersonCard_IsAttachCondit=1&Person_id=660910003025830&idDecl=0&NDecl=0&Server_id=13003795&user_id=&PersonCardAttach_OrderNumber=&LpuRegion_id=3154&LpuRegion_Fapid='
+
+  ОТВЕТ:
+  {"PersonCard_id":"660101000482453","success":true,"Error_Code":null,"Error_Msg":"","PersonCardAttach_id":"660101000236849","Cancel_Error_Handle":true}

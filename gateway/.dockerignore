@@ -1,0 +1,18 @@
+# Ключи, сертификаты и личные файлы никогда не должны попасть в образ шлюза.
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.asc
+*.jks
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.idea/
+tests/

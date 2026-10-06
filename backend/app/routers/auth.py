@@ -157,22 +157,25 @@ async def gateway_health():
         )
         return report
 
-    started = time.monotonic()
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=5.0), verify=False
-        ) as client:
-            resp = await client.get(f"{url}/health")
-        report["steps"]["health"] = {
-            "ok": resp.status_code == 200,
-            "status": resp.status_code,
-            "ms": round((time.monotonic() - started) * 1000),
-        }
-    except Exception as e:  # noqa: BLE001 — здесь нужен факт, а не тип
-        report["steps"]["health"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    # Отвечает ли по этому адресу именно наш шлюз. Без этой проверки самая
+    # частая ошибка выглядит загадочно: на /api/v1/auth/login приходит
+    # 404 {"detail":"Not Found"} от посторонней программы.
+    probe = await mis_client.probe_gateway()
+    report["steps"]["probe"] = probe
+    if not probe.get("isGateway"):
         report["ok"] = False
-        report["hint"] = f"Шлюз не ответил на /health: {type(e).__name__}: {e}"
+        report["hint"] = probe.get("reason") or "По этому адресу нет нашего шлюза."
         return report
+    report["steps"]["gatewayIdentity"] = {
+        "ok": True,
+        "service": probe.get("service"),
+        "byMarker": probe.get("byMarker"),
+        "note": (
+            "маркер сервиса подтверждён"
+            if probe.get("byMarker")
+            else "маркера нет (старая сборка шлюза), маршрут входа отвечает как у шлюза"
+        ),
+    }
 
     try:
         status = await mis_client.get_credentials_status()

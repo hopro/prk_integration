@@ -1,0 +1,23 @@
+curl 'https://ecp.mis66.ru/?c=Common&m=loadPersonData' \
+  --compressed \
+  -X POST \
+  -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0' \
+  -H 'Accept: */*' \
+  -H 'Accept-Language: ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3' \
+  -H 'Accept-Encoding: gzip, deflate, br, zstd' \
+  -H 'X-Requested-With: XMLHttpRequest' \
+  -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' \
+  -H 'Origin: https://ecp.mis66.ru' \
+  -H 'DNT: 1' \
+  -H 'Sec-GPC: 1' \
+  -H 'Connection: keep-alive' \
+  -H 'Referer: https://ecp.mis66.ru/?c=promed' \
+  -H 'Cookie: PHPSESSID=nqvcjb99mfgm5f3duggde25spt; csrfToken=495eef6d8dadd66bc4715943e5dd2e2e617dfa03f20d861b14cf0b6d829b1439; route=f097b6c1dad255b0dac4761990b68d0c; login=adm_glinnik; JSESSIONID=61DDAE1065071463FBA8259BBB82F2B5' \
+  -H 'Sec-Fetch-Dest: empty' \
+  -H 'Sec-Fetch-Mode: cors' \
+  -H 'Sec-Fetch-Site: same-origin' \
+  -H 'Priority: u=0' \
+  -H 'TE: trailers' \
+  --data-raw 'Person_id=660910003025820&Server_id=13003795&mode=PersonInformationPanel&additionalFields=%5B%5D'
+
+  [{"Person_id":"660910003025820","PersonEvn_id":"660101016522040","Server_id":"13003795","Server_pid":"13003795","Person_AgeMonth":"301","Person_Birthday":"05.05.2001","Person_IsUnknown":null,"Person_IsDead":null,"PersonCloseCause_id":null,"Person_deadDT":"","Person_deadTime":"","Person_closeDT":"","Lpu_id":"13003795","Person_PAddress":"\u0413 \u041d\u0418\u0416\u041d\u0418\u0419 \u0422\u0410\u0413\u0418\u041b, \u0421\u0415\u0420\u0415\u0411\u0420\u042f\u041d\u041a\u0410 \u0421, \u0410\u0428\u041a\u0418\u041d\u0421\u041a\u0410\u042f \u0423\u041b, \u0434. 11,","PAddress_Address":"622931, \u0420\u041e\u0421\u0421\u0418\u042f, \u0421\u0412\u0415\u0420\u0414\u041b\u041e\u0412\u0421\u041a\u0410\u042f \u041e\u0411\u041b, \u0413 \u041d\u0418\u0416\u041d\u0418\u0419 \u0422\u0410\u0413\u0418\u041b, \u0421\u0415\u0420\u0415\u0411\u0420\u042f\u041d\u041a\u0410 \u0421, \u0410\u0428\u041a\u0418\u041d\u0421\u041a\u0410\u042f \u0423\u041b, \u0434. 11,","Person_RAddress":"\u0413 \u041d\u0418\u0416\u041d\u0418\u0419 \u0422\u0410\u0413\u0418\u041b, \u0421\u0415\u0420\u0415\u0411\u0420\u042f\u041d\u041a\u0410 \u0421, \u0410\u0428\u041a\u0418\u041d\u0421\u041a\u0410\u042f \u0423\u041b, \u0434. 11,","RAddress_begDate":"","RAddress_Address":"622931, \u0420\u041e\u0421\u0421\u0418\u042f, \u0421\u0412\u0415\u0420\u0414\u041b\u041e\u0412\u0421\u041a\u0410\u042f \u041e\u0411\u041b, \u0413 \u041d\u0418\u0416\u041d\u0418\u0419 \u0422\u0410\u0413\u0418\u041b, \u0421\u0415\u0420\u0415\u0411\u0420\u042f\u041d\u041a\u0410 \u0421, \u0410\u0428\u041a\u0418\u041d\u0421\u041a\u0410\u042f \u0423\u041b, \u0434. 11,","Person_Phone":"9991234567 (\u0411\u0414)","OrgDep_Name":"","Lpu_Nick":"\u0413\u0410\u0423\u0417 \u0421\u041e \"\u0413\u041f \u0433. \u041d\u0438\u0436\u043d\u0438\u0439 \u0422\u0430\u0433\u0438\u043b\"","PersonCard_begDate":"03.07.2026","PersonCard_id":"660101003012662","PersonCard_Code":"12986","PersonCard_endDate":"","LpuRegion_Name":"16","KLAreaType_id":"2","DocumentType_id":null,"DocumentType_Code":null,"DocumentType_Name":"","Document_Num":"","Document_Ser":"","Document_begDate":"","Person_Inn":"569875156789","Person_Snils":"89956944020","SocStatus_id":"10000071","SocStatusFed_id":"5","Person_Age":"25","Person_IsBDZ":"0","Person_Post":"","Person_Post_id":"0","JobOrg_id":null,"Person_Job":"","OrgSmo_Name":"","OrgSmo_id":null,"OmsSprTerr_id":"0","OmsSprTerr_Code":"0","Polis_Ser":"","Polis_Num":null,"Polis_begDate":"","Polis_endDate":"","Sex_Code":"1","Sex_Name":"\u041c\u0443\u0436\u0441\u043a\u043e\u0439","Sex_id":"1","SocStatus_Name":"\u0420\u0430\u0431\u043e\u0442\u0430\u044e\u0449\u0438\u0439","PersonEducationLevel":"\u0412\u044b\u0441\u0448\u0435\u0435 \u043e\u0431\u0440\u0430\u0437\u043e\u0432\u0430\u043d\u0438\u0435 - \u0441\u043f\u0435\u0446\u0438\u0430\u043b\u0438\u0442\u0435\u0442","Person_ShortFio":"\u0422\u0415\u0421\u0422\u041e\u0412 \u0413. \u0422.","Person_Surname":"\u0422\u0415\u0421\u0422\u041e\u0412","Person_Firname":"\u0413\u041f4","Person_Secname":"\u0422\u0410\u0413\u0418\u041b","PersonEncrypHIV_Encryp":null,"PersonQuarantine_IsOn":"false","PersonQuarantine_begDT":null,"KLCountry_Code":"643","KLCountry_Name":"\u0420\u041e\u0421\u0421\u0418\u042f","Person_EdNum":"","SurNameLetter":"\u0422","Person_syncDT":null,"EvnPS_IsActive":null,"PersonPregnancy":[]}]

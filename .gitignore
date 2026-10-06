@@ -46,6 +46,16 @@ ReplySCD.xml
 frontend/tsconfig.tsbuildinfo
 mis_integration/openapi.json
 
+# Ключи, сертификаты, контейнеры с ключами — никогда в репозиторий
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.asc
+
 # OS и редакторы
 .DS_Store
 Thumbs.db

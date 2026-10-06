@@ -91,6 +91,15 @@ docker compose up -d --build
 | `TFOMS_DIR` | Каталог с файлами справочников | `/app/tfoms` |
 | `TFOMS_ENCODING` | Кодировка XML-выгрузок | `cp1251` |
 
+## Проверка связи со шлюзом
+
+```
+GET /api/v1/auth/gateway-health
+```
+
+Разбирает связь backend → шлюз по шагам `resolve`, `tcp`, `probe`, `login` и в
+поле `hint` пишет, что чинить. Проверять и ЕЦП, и настройку адреса не нужно.
+
 ## SOAP-сервисы
 
 | Сервис | URL | Операция |
@@ -204,8 +213,19 @@ prk_integration/
 │   │   ├── api/                 # HTTP-клиенты
 │   │   └── components/          # React-компоненты
 │   └── Dockerfile
-└── docker-compose.yml
+├── gateway/
+│   ├── app/
+│   │   ├── auth/               # вход в шлюз, учётные данные ЕЦП
+│   │   ├── mis/                # HTTP-клиент ЕЦП и прокси-эндпоинты
+│   │   ├── common/             # единый формат ответа, обработка ошибок
+│   │   └── main.py             # FastAPI, /health
+│   └── Dockerfile
+├── deploy/                     # make_bundle.sh и шаблоны справочников
+└── docker-compose.yml          # единый compose для разработки и развёртывания
 ```
+
+Один `docker-compose.yml` на всё: при клонировании репозитория и при сборке
+комплекта из него используется одна и та же топология.
 
 ## Разработка без Docker
 

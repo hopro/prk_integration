@@ -10,12 +10,14 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-GATEWAY_SRC="${GATEWAY_SRC:-$ROOT/../mis_integration}"
+# Исходники шлюза лежат в репозитории: ./gateway. Комплект собирается из
+# одного клона, путь на машине разработчика не нужен.
+GATEWAY_SRC="$ROOT/gateway"
 OUT="${1:-$ROOT/dist/prk-deploy}"
 
 if [[ ! -d "$GATEWAY_SRC/app" ]]; then
   echo "Не найден исходник шлюза: $GATEWAY_SRC" >&2
-  echo "Укажите путь переменной окружения GATEWAY_SRC=/path/to/mis_integration" >&2
+  echo "Ожидается каталог ./gateway с исходниками шлюза (app/, Dockerfile)." >&2
   exit 1
 fi
 
@@ -56,7 +58,7 @@ done
 echo "  файлов справочников скопировано: $tfoms_copied"
 
 # Развёртывание.
-cp "$HERE/docker-compose.yml" "$OUT/docker-compose.yml"
+cp "$ROOT/docker-compose.yml" "$OUT/docker-compose.yml"
 cp "$HERE/.env.example"       "$OUT/.env.example"
 cp "$HERE/README.md"          "$OUT/README.md"
 cp -r "$HERE/dictionaries"    "$OUT/dictionaries"
