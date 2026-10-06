@@ -1,6 +1,4 @@
 import logging
-import socket
-import time
 from urllib.parse import urlparse
 
 import httpx
@@ -119,41 +117,21 @@ async def gateway_health():
         "gatewayUrl": url,
         "host": host,
         "port": port,
+        "service": "prk-backend",
+        "version": "1.0.0",
         "steps": {},
     }
 
-    started = time.monotonic()
-    try:
-        addresses = sorted({ai[4][0] for ai in socket.getaddrinfo(host, port)})
-        report["steps"]["resolve"] = {"ok": True, "addresses": addresses}
-    except OSError as e:
-        report["steps"]["resolve"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    tcp = mis_client.tcp_probe(url)
+    report["steps"]["tcp"] = {"ok": bool(tcp.get("connected")), **tcp}
+    report["peer"] = tcp.get("peer")
+    if not tcp.get("connected"):
         report["ok"] = False
         report["hint"] = (
-            "Имя шлюза не разрешается. Внутри сети compose адрес шлюза — "
-            "http://gateway:8010. Проверьте, что сервис называется gateway и запущен."
-        )
-        return report
-
-    started = time.monotonic()
-    try:
-        with socket.create_connection((host, port), timeout=5.0):
-            report["steps"]["tcp"] = {
-                "ok": True,
-                "ms": round((time.monotonic() - started) * 1000),
-            }
-    except OSError as e:
-        report["steps"]["tcp"] = {
-            "ok": False,
-            "error": f"{type(e).__name__}: {e}",
-            "ms": round((time.monotonic() - started) * 1000),
-        }
-        report["ok"] = False
-        report["hint"] = (
-            f"Порт {port} на {host} не принимает соединения. Проверьте, что контейнер "
-            "шлюза запущен (`docker compose ps gateway`) и слушает 0.0.0.0, а не "
-            "127.0.0.1. Если имя разрешается во внешний адрес — отключите dns_search "
-            "или укажите MIS_GATEWAY_URL с IP-адресом контейнера шлюза."
+            f"Соединение с {host}:{port} не устанавливается. Имя разрешилось в "
+            f"{', '.join(a['address'] for a in tcp['addresses']) or 'ничего'}, "
+            f"отвечающих адресов {tcp.get('connected', 0)} из {tcp.get('total', 0)}. "
+            "Проверьте, что контейнер шлюза запущен (`docker compose ps gateway`)."
         )
         return report
 
@@ -162,8 +140,15 @@ async def gateway_health():
     # 404 {"detail":"Not Found"} от посторонней программы.
     probe = await mis_client.probe_gateway()
     report["steps"]["probe"] = probe
+    report["peer"] = probe.get("peer")
+    if probe.get("isBackend"):
+        report["ok"] = False
+        report["verdict"] = "MIS_GATEWAY_URL указывает на сам backend"
+        report["hint"] = probe.get("reason")
+        return report
     if not probe.get("isGateway"):
         report["ok"] = False
+        report["verdict"] = "по этому адресу не наш шлюз"
         report["hint"] = probe.get("reason") or "По этому адресу нет нашего шлюза."
         return report
     report["steps"]["gatewayIdentity"] = {
@@ -176,14 +161,17 @@ async def gateway_health():
             else "маркера нет (старая сборка шлюза), маршрут входа отвечает как у шлюза"
         ),
     }
+    report["peer"] = probe.get("peer")
 
     try:
         status = await mis_client.get_credentials_status()
         report["steps"]["login"] = {"ok": True, "credentials": status}
         report["ok"] = True
+        report["verdict"] = "шлюз доступен, вход работает"
     except Exception as e:  # noqa: BLE001
         report["steps"]["login"] = {"ok": False, "error": str(e) or type(e).__name__}
         report["ok"] = False
+        report["verdict"] = "шлюз есть, вход не удался"
         report["hint"] = "Шлюз отвечает, но вход не удался: " + (str(e) or type(e).__name__)
 
     return report

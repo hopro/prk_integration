@@ -30,35 +30,127 @@ def invalidate_token():
 # 404 {"detail":"Not Found"}, и backend не мог понять, что подключился не туда.
 GATEWAY_HEALTH = "/health"
 GATEWAY_SERVICE = "mis-gateway"
+BACKEND_SERVICE = "prk-backend"
+BACKEND_HEALTH = "/api/health"
 LOGIN_ROUTE = "/api/v1/auth/login"
+
+
+def _peer(resp: httpx.Response) -> str:
+    """Адрес, с которым соединён клиент httpx (если транспорт его отдаёт)."""
+    try:
+        stream = resp.extensions.get("network_stream")
+        if stream is not None:
+            addr = stream.get_extra_info("server_addr")
+            if addr:
+                return f"{addr[0]}:{addr[1]}"
+    except Exception:  # noqa: BLE001 — диагностика не должна ломать запрос
+        pass
+    return "неизвестно"
+
+
+def tcp_probe(url: str, timeout: float = 5.0) -> dict[str, Any]:
+    """Куда реально уходит соединение.
+
+    httpx не отдаёт адрес пира (у anyio-транспорта server_addr пуст), поэтому
+    подключаемся сами и берём getpeername. Заодно видно, какие из адресов,
+    на которые разрешилось имя, действительно отвечают — с именем в конфиге
+    иначе не разберёшься.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or url
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    report: dict[str, Any] = {"host": host, "port": port, "addresses": []}
+
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError as e:
+        report["resolveError"] = f"{type(e).__name__}: {e}"
+        return report
+
+    seen = []
+    for family, socktype, proto, _canon, sockaddr in infos:
+        addr = f"{sockaddr[0]}:{sockaddr[1]}"
+        if addr in seen:
+            continue
+        seen.append(addr)
+        entry: dict[str, Any] = {"address": addr, "connected": False}
+        sock = None
+        try:
+            sock = socket.socket(family, socktype, proto)
+            sock.settimeout(timeout)
+            sock.connect(sockaddr)
+            entry["connected"] = True
+            peer = sock.getpeername()
+            entry["peer"] = f"{peer[0]}:{peer[1]}"
+        except OSError as e:
+            entry["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            if sock is not None:
+                sock.close()
+        report["addresses"].append(entry)
+
+    connected = [a for a in report["addresses"] if a.get("connected")]
+    report["connected"] = len(connected)
+    report["total"] = len(report["addresses"])
+    report["peer"] = connected[0].get("peer") if connected else None
+    return report
 
 
 async def probe_gateway() -> dict[str, Any]:
     """Отвечает ли по MIS_GATEWAY_URL именно наш шлюз.
 
-    Возвращает признак is_gateway и короткое объяснение. Ничего не меняет.
+    Проверяет по порядку: куда уходит соединение (tcp), что за сервис там
+    (/health и /api/health — у шлюза и у backend метки разные) и есть ли
+    маршрут входа. Ничего не меняет, только читает.
     """
     result: dict[str, Any] = {"url": MIS_GATEWAY_URL, "isGateway": False}
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=5.0), verify=False
-        ) as client:
-            resp = await client.get(f"{MIS_GATEWAY_URL}{GATEWAY_HEALTH}")
-    except httpx.RequestError as e:
-        result["error"] = f"{type(e).__name__}: {e}"
-        result["reason"] = describe_unreachable(e)
+
+    tcp = tcp_probe(MIS_GATEWAY_URL)
+    result["tcp"] = tcp
+    result["peer"] = tcp.get("peer")
+    if not tcp.get("connected"):
+        result["reason"] = (
+            f"По адресу {MIS_GATEWAY_URL} соединение не устанавливается. "
+            f"Имя разрешилось в {', '.join(a['address'] for a in tcp['addresses']) or 'ничего'}, "
+            f"отвечающих адресов: {tcp.get('connected', 0)} из {tcp.get('total', 0)}."
+        )
+        logger.error("МИС-ШЛЮЗ: %s", result["reason"])
         return result
 
-    result["healthStatus"] = resp.status_code
+    # Метку сервиса ищем на обоих адресах: /health есть у шлюза,
+    # /api/health — у backend.
     service = None
-    try:
-        body = resp.json()
-        if isinstance(body, dict):
-            service = body.get("service")
-    except Exception:
-        pass
-    if service:
-        result["service"] = service
+    probes = {}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), verify=False) as client:
+        for path in (GATEWAY_HEALTH, BACKEND_HEALTH):
+            try:
+                resp = await client.get(f"{MIS_GATEWAY_URL}{path}")
+            except httpx.RequestError as e:
+                probes[path] = {"error": f"{type(e).__name__}: {e}"}
+                continue
+            probes[path] = {"status": resp.status_code}
+            if resp.status_code == 200:
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = {}
+                if isinstance(body, dict) and body.get("service"):
+                    service = body["service"]
+                    probes[path]["service"] = service
+    result["probes"] = probes
+    result["service"] = service
+    result["healthStatus"] = probes.get(GATEWAY_HEALTH, {}).get("status")
+
+    if service == BACKEND_SERVICE:
+        result["isBackend"] = True
+        result["reason"] = (
+            f"MIS_GATEWAY_URL={MIS_GATEWAY_URL} указывает на САМ backend "
+            f"(service={BACKEND_SERVICE}, соединение приземлилось на {tcp.get('peer')}), "
+            "а не на шлюз ЕЦП. Уберите это значение из .env — тогда подставится "
+            "адрес шлюза из compose (gateway:8010) — либо укажите адрес шлюза явно."
+        )
+        logger.error("МИС-ШЛЮЗ: %s", result["reason"])
+        return result
 
     # Второй признак, не зависящий от версии шлюза: наш маршрут входа
     # отвечает 401 или 422, а чужое приложение — 404.
@@ -67,14 +159,10 @@ async def probe_gateway() -> dict[str, Any]:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(10.0, connect=5.0), verify=False
         ) as client:
-            probe_login = await client.post(
-                f"{MIS_GATEWAY_URL}{LOGIN_ROUTE}", json={}
-            )
-        login_status = probe_login.status_code
+            resp = await client.post(f"{MIS_GATEWAY_URL}{LOGIN_ROUTE}", json={})
+        login_status = resp.status_code
     except httpx.RequestError as e:
-        result["error"] = f"{type(e).__name__}: {e}"
-        result["reason"] = describe_unreachable(e)
-        return result
+        result["loginError"] = f"{type(e).__name__}: {e}"
     result["loginStatus"] = login_status
 
     marked = service == GATEWAY_SERVICE
@@ -84,10 +172,19 @@ async def probe_gateway() -> dict[str, Any]:
 
     if not result["isGateway"]:
         result["reason"] = (
-            f"По адресу {MIS_GATEWAY_URL} отвечает не наш шлюз: на /health — "
-            f"{resp.status_code}, на {LOGIN_ROUTE} — {login_status}. "
-            f"Проверьте MIS_GATEWAY_URL: по этому адресу слушает другая программа."
+            f"По адресу {MIS_GATEWAY_URL} (соединение приземлилось на "
+            f"{tcp.get('peer')}) отвечает не наш шлюз: "
+            f"на /health — {probes.get(GATEWAY_HEALTH, {}).get('status')}, "
+            f"на {LOGIN_ROUTE} — {login_status}. Проверьте MIS_GATEWAY_URL: "
+            "по этому адресу слушает другая программа."
         )
+
+    logger.info(
+        "МИС-ШЛЮЗ: url=%s пир=%s сервис=%s вход=%s наш_шлюз=%s",
+        MIS_GATEWAY_URL, tcp.get("peer"), service, login_status, result["isGateway"],
+    )
+    if not result["isGateway"]:
+        logger.error("МИС-ШЛЮЗ: %s", result["reason"])
     return result
 
 
@@ -96,10 +193,16 @@ async def _login_once() -> httpx.Response:
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(15.0, connect=5.0), verify=False
     ) as client:
-        return await client.post(
+        resp = await client.post(
             f"{MIS_GATEWAY_URL}{LOGIN_ROUTE}",
             json={"login": GATEWAY_LOGIN, "password": GATEWAY_PASSWORD},
         )
+    logger.info(
+        "МИС-ШЛЮЗ вход: url=%s/%s peer=%s login=%s ответ=%s",
+        MIS_GATEWAY_URL, LOGIN_ROUTE, _peer(resp), GATEWAY_LOGIN,
+        _body_excerpt(resp.text, 200),
+    )
+    return resp
 
 
 def describe_unreachable(exc: Exception) -> str:
@@ -187,12 +290,18 @@ async def _login() -> str:
     if resp.status_code in (404, 405):
         probe = await probe_gateway()
         raise RuntimeError(probe.get("reason") or (
-            f"По адресу {MIS_GATEWAY_URL} нет шлюза ЕЦП "
-            f"({resp.status_code} на /api/v1/auth/login)."
+            f"По адресу {MIS_GATEWAY_URL} (пир {_peer(resp)}) нет шлюза ЕЦП: "
+            f"{resp.status_code} на {LOGIN_ROUTE}, тело {_body_excerpt(resp.text, 200)}"
         ))
     if resp.status_code >= 400:
+        detail = _body_excerpt(resp.text, 200)
+        logger.error(
+            "МИС-ШЛЮЗ: вход отклонён %s на %s (пир %s): %s",
+            resp.status_code, MIS_GATEWAY_URL, _peer(resp), detail,
+        )
         raise RuntimeError(
-            f"Шлюз ЕЦП отклонил вход ({resp.status_code}): {_body_excerpt(resp.text)}"
+            f"Шлюз ЕЦП по адресу {MIS_GATEWAY_URL} (пир {_peer(resp)}) "
+            f"отклонил вход: {resp.status_code} {detail}"
         )
     data = resp.json()
     _token = data.get("access_token") or data.get("data", {}).get("access_token")
