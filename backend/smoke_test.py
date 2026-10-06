@@ -9,8 +9,12 @@
 Тест НЕ разрушающий: `POST /api/settings` сначала читает текущие настройки и
 записывает их же обратно, поэтому рабочие учётные данные ИАС-4 не подменяются.
 
-Запуск (backend работает на 127.0.0.1:8000):
-    python3 backend/smoke_test.py [http://127.0.0.1:8000]
+Запуск (по умолчанию — через интерфейс, порт 3001):
+    python3 backend/smoke_test.py [http://127.0.0.1:3001]
+
+Порт backend на хост не публикуется: снаружи доступен только интерфейс,
+а он проксирует /api на backend. Проверять надо именно так, как проверяет
+пользователь.
 """
 
 import json
@@ -19,7 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000"
+BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:3001"
 
 
 def call(method: str, path: str, body: dict | None, full: bool = False) -> tuple[int, str]:
