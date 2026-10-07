@@ -72,7 +72,7 @@ STATIC_CHECKS = [
     ("GET", "/api/dictionaries/sources", None),
     ("GET", "/api/dictionaries/regions", None),
     ("GET", "/api/dictionaries/region-links", None),
-    ("GET", "/api/dictionaries/region-links?includeForbidden=true", None),
+    ("GET", "/api/dictionaries/region-links?includeUnavailable=true", None),
     ("GET", "/api/dictionaries/region-links/suggest", None),
     ("GET", "/api/dictionaries/entries?kind=spdept&search=ТУ", None),
     ("GET", "/api/dict", None),

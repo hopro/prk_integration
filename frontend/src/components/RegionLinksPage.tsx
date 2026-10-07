@@ -82,10 +82,11 @@ function LinkRow({
       <TableCell sx={{ width: 110, fontFamily: 'monospace' }}>{row.podr}</TableCell>
       <TableCell>
         {row.name || '—'}
-        {/* Закрытое подразделение ИАС-4 больше не примет — предупреждаем. */}
+        {/* По умолчанию закрытых подразделений в таблице нет: ИАС-4 их не
+            примет. Метка нужна, когда их открыли галочкой. */}
         {!row.actual && (
           <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
-            подразделение закрыто{row.validUntil ? ` (${row.validUntil})` : ''}
+            закрыто, ИАС-4 не примет{row.validUntil ? ` (до ${row.validUntil})` : ''}
           </Typography>
         )}
         {row.canAttach === false && (
@@ -176,7 +177,7 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   // По умолчанию показываем только то, к чему ИАС-4 примет прикрепление.
-  const [includeForbidden, setIncludeForbidden] = useState(false);
+  const [includeUnavailable, setIncludeUnavailable] = useState(false);
   const [busy, setBusy] = useState<string>('');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -188,13 +189,13 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
     setLoading(true);
     setError('');
     try {
-      setMatrix(await fetchRegionLinks(lpuId, includeForbidden));
+      setMatrix(await fetchRegionLinks(lpuId, includeUnavailable));
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось загрузить сопоставление');
     } finally {
       setLoading(false);
     }
-  }, [lpuId, includeForbidden]);
+  }, [lpuId, includeUnavailable]);
 
   useEffect(() => {
     reload();
@@ -364,31 +365,9 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
             </Box>
             <Box>
               <Typography variant="caption" color="text.secondary">
-                Отвязано намеренно
-              </Typography>
-              <Typography variant="h6">{s.unlinked}</Typography>
-            </Box>
-            <Box>
-              <Typography variant="caption" color="text.secondary">
-                ФАПов среди подразделений
+                Из них ФАПов
               </Typography>
               <Typography variant="h6">{s.faps ?? 0}</Typography>
-            </Box>
-            <Box>
-              <Typography variant="caption" color="text.secondary">
-                Закрытых подразделений
-              </Typography>
-              <Typography variant="h6" color={s.expired ? 'warning.main' : 'text.primary'}>
-                {s.expired}
-              </Typography>
-            </Box>
-            <Box>
-              <Typography variant="caption" color="text.secondary">
-                Битых привязок
-              </Typography>
-              <Typography variant="h6" color={s.broken ? 'error.main' : 'text.primary'}>
-                {s.broken}
-              </Typography>
             </Box>
             <Box>
               <Typography variant="caption" color="text.secondary">
@@ -414,15 +393,15 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
               control={
                 <Checkbox
                   size="small"
-                  checked={includeForbidden}
-                  onChange={(e) => setIncludeForbidden(e.target.checked)}
+                  checked={includeUnavailable}
+                  onChange={(e) => setIncludeUnavailable(e.target.checked)}
                   disabled={busy !== ''}
                 />
               }
               label={
                 <Typography variant="caption">
-                  показать запрещённые
-                  {s.hiddenForbidden ? ` (${s.hiddenForbidden})` : ''}
+                  показать недоступные
+                  {s.hiddenUnavailable ? ` (${s.hiddenUnavailable})` : ''}
                 </Typography>
               }
             />

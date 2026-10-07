@@ -300,31 +300,32 @@ def _link_lpu_id(lpuId: str) -> str:
 @router.get("/region-links")
 async def region_links_matrix(
     lpuId: str = Query("", alias="lpuId"),
-    includeForbidden: bool = Query(False),
+    includeUnavailable: bool = Query(False),
 ):
     """Таблица сопоставления: коды подразделений ИАС-4 и участки ЕЦП.
 
-    По умолчанию показываются подразделения, к которым ИАС-4 примет
-    прикрепление: без признака «разрешено прикрепление» он отвечает 502.
-    Закрытые по сроку действия видны всегда, но помечены.
+    По умолчанию только то, к чему ИАС-4 примет прикрепление. Закрытые по сроку
+    действия он отклоняет с 501, а без признака «разрешено прикрепление» — с 502,
+    поэтому в таблице их нет. includeUnavailable=true показывает и их.
     """
     lpu_id = _link_lpu_id(lpuId)
     regions = dict_db.get_regions(lpu_id)
     ias = region_links.mo_entries(
         (settings_db.get_settings().get("defaultMo") or ""),
-        include_forbidden=includeForbidden,
+        include_unavailable=includeUnavailable,
     )
     matrix = region_links.build_matrix(lpu_id, regions, ias)
     matrix["mo"] = (settings_db.get_settings().get("defaultMo") or "").strip().lstrip("0")
     # Сколько подразделений скрыто переключателем: без этого числа администратор
-    # не понимает, много ли ещё запрещённых осталось за кадром.
-    if not includeForbidden:
+    # не понимает, много ли ещё непригодных осталось за кадром.
+    if not includeUnavailable:
         hidden = region_links.mo_entries(
-            (settings_db.get_settings().get("defaultMo") or ""), include_forbidden=True
+            (settings_db.get_settings().get("defaultMo") or ""),
+            include_unavailable=True,
         )
-        matrix["summary"]["hiddenForbidden"] = len(hidden) - len(ias)
+        matrix["summary"]["hiddenUnavailable"] = len(hidden) - len(ias)
     else:
-        matrix["summary"]["hiddenForbidden"] = 0
+        matrix["summary"]["hiddenUnavailable"] = 0
     matrix["regionsLoaded"] = bool(regions)
     matrix["iasLoaded"] = bool(ias)
     if not regions:
@@ -390,10 +391,9 @@ async def suggest_region_links(lpuId: str = Query("", alias="lpuId")):
     """Что предложил бы автоматический подбор. Ничего не сохраняет."""
     lpu_id = _link_lpu_id(lpuId)
     regions = dict_db.get_regions(lpu_id)
-    ias = region_links.mo_entries(
-        (settings_db.get_settings().get("defaultMo") or ""),
-        include_forbidden=True,
-    )
+    # Автоподбор идёт по всем подразделениям, но закрытые и запрещённые он и сам
+    # пропускает: ИАС-4 их всё равно не примет.
+    ias = region_links.mo_entries((settings_db.get_settings().get("defaultMo") or ""))
     items = region_links.suggest(lpu_id, regions, ias)
     return {
         "lpuId": lpu_id,

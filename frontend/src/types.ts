@@ -29,7 +29,7 @@ export interface SettingsData {
 }
 
 export interface DictionaryItem {
-  kind: 'regions' | 'spmo' | 'spsmo' | 'spdept';
+  kind: 'regions' | 'spmo' | 'spsmo' | 'spdept' | 'spsubdept';
   title: string;
   /** Область действия: Lpu_id для участков, код МО для подразделений. */
   scope: string;
@@ -339,10 +339,8 @@ export interface RegionLinksMatrix {
     regions: number;
     regionsUsed: number;
     regionsFree: number;
-    expired: number;
-    linkedExpired: number;
-    /** Сколько подразделений скрыто переключателем «показать запрещённые». */
-    hiddenForbidden?: number;
+    /** Сколько подразделений скрыто переключателем «показать недоступные». */
+    hiddenUnavailable?: number;
     /** Сколько ФАПов среди подразделений. */
     faps?: number;
   };

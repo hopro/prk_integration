@@ -116,10 +116,10 @@ export async function uploadDictionaryXml(
 
 export async function fetchRegionLinks(
   lpuId: string,
-  includeForbidden = false,
+  includeUnavailable = false,
 ): Promise<RegionLinksMatrix> {
   const response = await client.get<RegionLinksMatrix>('/region-links', {
-    params: { lpuId, includeForbidden },
+    params: { lpuId, includeUnavailable },
   });
   return response.data;
 }

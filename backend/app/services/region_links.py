@@ -150,21 +150,30 @@ def _mo_scope(kind: str, mo: str) -> str:
     return ""
 
 
-def mo_entries(mo: str = "", include_forbidden: bool = False) -> list[dict]:
+def mo_entries(mo: str = "", include_unavailable: bool = False) -> list[dict]:
     """Подразделения и ФАПы того МО, который задан в настройках.
 
-    Сопоставлять нужно только свои подразделения: в выгрузках 159 медицинских
-    организаций, и чужие коды в таблице сопоставления только мешают.
+    По умолчанию возвращается только то, к чему ИАС-4 примет прикрепление:
+    действующие подразделения с признаком «разрешено прикрепление». Закрытые по
+    сроку действия он отклоняет с 501, а снятые с признака — с 502, поэтому в
+    сопоставлении им не место.
+
+    include_unavailable=True возвращает всё, включая закрытые и запрещённые, —
+    это нужно для галочки в интерфейсе.
     """
+    today = datetime.date.today().isoformat()
     result: list[dict] = []
     for kind in IAS_DEPT_KINDS:
         scope = _mo_scope(kind, mo)
-        # По умолчанию показываем только то, к чему ИАС-4 вообще примет
-        # прикрепление: подразделения с PRKYES=0 он отклоняет с кодом 502.
-        rows = dict_db.get_entries(kind, scope, attachable_only=not include_forbidden)
-        for row in rows:
+        for row in dict_db.get_entries(kind, scope):
+            if not include_unavailable:
+                valid_until = row.get("valid_until") or ""
+                if valid_until not in ("", "9999-12-31") and valid_until < today:
+                    continue
+                if (row.get("can_attach") or "") == "0":
+                    continue
             row["kind"] = kind
-        result += rows
+            result.append(row)
     return result
 
 
@@ -312,8 +321,6 @@ def build_matrix(
         item["linkedBy"] = auto.get(item["regionId"], "")
 
     manual = sum(1 for r in rows if r["source"] == "manual")
-    unlinked = sum(1 for r in rows if r["source"] == "unlinked")
-    linked_expired = sum(1 for r in rows if r["linked"] and not r["actual"])
     return {
         "lpuId": lpu_id,
         "rows": rows,
@@ -322,21 +329,21 @@ def build_matrix(
             "ias": len(rows),
             "linked": sum(1 for r in rows if r["linked"]),
             "manual": manual,
-            "unlinked": unlinked,
             "unresolved": sum(1 for r in rows if not r["linked"] and not r["source"]),
-            "broken": sum(1 for r in rows if r["how"] == HOW_MISSING_REGION),
             "regions": len(regions),
             "regionsUsed": len(used),
             "regionsFree": len(free),
-            "expired": sum(1 for r in rows if not r["actual"]),
-            "forbidden": sum(1 for e in ias if (e.get("can_attach") or "") == "0"),
             "faps": sum(1 for r in rows if r["origin"] == KIND_LABELS["spsubdept"]),
-            "linkedExpired": linked_expired,
         },
     }
 
 
 def suggest(lpu_id: str, regions: list[dict], ias: list[dict]) -> list[dict]:
+    """Что предложил бы автоматический подбор. Ничего не сохраняет.
+
+    Закрытые подразделения и подразделения без признака «разрешено
+    прикрепление» не предлагаются: ИАС-4 их отклонит с 501 и 502.
+    """
     """Автоподбор для кодов без ручной привязки.
 
     Участок не предлагается, если он уже занят другим подразделением: иначе

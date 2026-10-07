@@ -26,6 +26,7 @@ const KIND_LABELS: Record<Kind, string> = {
   spmo: 'Медицинские организации',
   spsmo: 'Страховые компании',
   spdept: 'Подразделения МО (справочник ИАС-4)',
+  spsubdept: 'ФАПы и прочие подразделения (SPSUBDEPT)',
 };
 
 /**
@@ -38,10 +39,16 @@ const KIND_SOURCE: Record<Kind, 'ecp' | 'tfoms'> = {
   spmo: 'tfoms',
   spsmo: 'tfoms',
   spdept: 'tfoms',
+  spsubdept: 'tfoms',
+};
+
+/** Записи журнала, которых нет среди справочников. */
+const LOG_LABELS: Record<string, string> = {
+  region_links: 'Сопоставление подразделений и участков',
 };
 
 /** Справочники из XML-выгрузок, включая подразделения ИАС-4. */
-const TFOMS_KINDS: Kind[] = ['spdept', 'spmo', 'spsmo'];
+const TFOMS_KINDS: Kind[] = ['spdept', 'spsubdept', 'spmo', 'spsmo'];
 
 export default function DictionariesPage({ defaultLpuId }: Props) {
   const [items, setItems] = useState<DictionaryItem[]>([]);
@@ -298,7 +305,7 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Справочники ТФОМС — только XML-выгрузки
           </Typography>
-          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: 'repeat(3, 1fr)' }} gap={2} sx={{ mb: 3 }}>
+          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: 'repeat(2, 1fr)' }} gap={2} sx={{ mb: 3 }}>
             {TFOMS_KINDS.map((kind) => {
               const entry = items.find((i) => i.kind === kind);
               return renderCard(kind, '', entry?.rows || 0, entry?.loadedAt || null);
@@ -328,7 +335,9 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>
                   {row.created_at ? new Date(row.created_at.replace(' ', 'T')).toLocaleString('ru-RU') : ''}
                 </TableCell>
-                <TableCell>{KIND_LABELS[row.kind as Kind] || row.kind}</TableCell>
+                <TableCell>
+                  {KIND_LABELS[row.kind as Kind] || LOG_LABELS[row.kind] || row.kind}
+                </TableCell>
                 <TableCell>{row.scope || '—'}</TableCell>
                 <TableCell align="right">{row.rows_loaded}</TableCell>
                 <TableCell>
