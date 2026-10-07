@@ -33,49 +33,46 @@ async def dict_list():
 
 
 @router.get("/dict/spdept")
-async def spdept_list(lpuId: str = "", mo: str = "", search: str = ""):
+async def spdept_list(mo: str = "", search: str = ""):
     """Подразделения ЛПУ для выбора кода, который уходит в ИАС-4 как podr.
 
-    Источник — справочник подразделений ИАС-4 (файл SPDEPT). Список участков
-    ЕЦП для этого не годится: там своя нумерация, и все коды с суффиксом _ГРП
-    (40 из 107 участков) ИАС-4 отвергает ошибкой 501 «отсутствует в справочнике».
-    Участки ЕЦП используются отдельно — при сопоставлении кода с участком при
-    сохранении карты в ЕЦП.
+    Источник — два справочника подразделений ИАС-4: SPDEPT (обычные
+    подразделения) и SPSUBDEPT (ФАПы, медкабинеты, дневные стационары). Берутся
+    подразделения той медицинской организации, которая указана в настройках, и
+    только те, что действуют и разрешают прикрепление.
+
+    Список участков ЕЦП для этого не годится: там своя нумерация, и все коды с
+    суффиксом _ГРП (а это 40 из 107 участков) ИАС-4 отвергает с ошибкой 501.
+    Участки ЕЦП нужны отдельно — по ним находится LpuRegion_id при сохранении
+    карты в ЕЦП.
     """
-    # Коды берём у подразделений того МО, который указан в настройках, и только
-    # те, что действуют на сегодня: в выгрузке ИАС-4 закрытые подразделения тоже
-    # лежат (у МО 893 из 93 актуальны 79), а ИАС-4 их больше не принимает.
-    today = datetime.date.today().isoformat()
-    mo_code = mo.strip() or (settings_db.get_settings().get("defaultMo") or "").strip().lstrip("0")
-    all_of_mo = dict_db.get_entries("spdept", mo_code)
-    rows = [r for r in all_of_mo if r.get("valid_until") in ("", "9999-12-31") or r["valid_until"] >= today]
-    if not rows and all_of_mo:
-        # Ничего актуального не нашлось — показываем все, иначе форма будет пустой.
-        rows = all_of_mo
+    rows, summary = region_links.picker_entries(mo)
 
     if search:
         needle = search.lower()
         rows = [
             r for r in rows
-            if needle in r["code"].lower()
-            or needle in r["name"].lower()
+            if needle in r["code"].lower() or needle in r["name"].lower()
             or needle in r["extra"].lower()
         ]
 
     payload = {
-        "spdept": [{"code": r["code"], "name": r["name"]} for r in rows],
-        "source": "ias" if rows else "not_loaded",
-        "mo": mo_code,
-        "total": len(all_of_mo),
-        "actual": len(rows),
-        "expired": len(all_of_mo) - len(rows),
+        "spdept": [
+            {"code": r["code"], "name": r["name"], "source": r["source"]} for r in rows
+        ],
+        "source": "ias" if summary["actual"] else "not_loaded",
+        "mo": summary["mo"],
+        "total": summary["total"],
+        "actual": summary["actual"],
+        "expired": max(0, summary["total"] - summary["actual"]),
     }
-    if not rows:
+    if not summary["actual"]:
         payload["hint"] = (
-            "Справочник подразделений ИАС-4 не загружен. Загрузите файл "
-            "SPDEPT.xml (или .zip, .csv) на вкладке «Справочники» — без него коды "
-            "подразделений взять неоткуда, а список участков ЕЦП содержит другую "
-            "нумерацию, которую ИАС-4 не принимает."
+            "Нет действующих подразделений для прикрепления. Проверьте, что "
+            "загружены оба справочника ИАС-4 — SPDEPT.xml и SPSUBDEPT.xml, — "
+            "и что код МО в настройках верный. Подразделения, у которых в "
+            "выгрузке закрыт срок действия или снят признак «разрешено "
+            "прикрепление», ИАС-4 не примет: на них он отвечает 501 и 502."
         )
     return payload
 

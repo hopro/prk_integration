@@ -10,7 +10,7 @@ Frontend (React + MUI)  ──HTTP──▶  Backend (FastAPI)  ──SOAP──
                                ├──▶ Шлюз ЕЦП ──▶ ЕЦП (participant card)
                                └──▶ SQLite + файлы справочников
                                      settings.db, dictionaries.db, prk_history.db
-                                     tfoms/SPMO.zip, SPSMO.zip, SPDEPT.xml
+                                     tfoms/SPMO.zip, SPSMO.zip, SPDEPT.xml, SPSUBDEPT.xml
 ```
 
 ## Развёртывание и обновление
@@ -168,9 +168,9 @@ SOAP_URL=http://10.0.100.5/IASWeb/LoadPrkTest/LoadPrk.asmx
 | Метод | Endpoint | Описание |
 |-------|----------|----------|
 | GET | `/api/dict` | МО и СМО |
-| GET | `/api/dict/spdept?mo=893` | Подразделения ИАС-4 для поля `podr` |
+| GET | `/api/dict/spdept?mo=893` | Подразделения и ФАПы ИАС-4 для поля `podr` |
 | GET | `/api/dict/spdept/coverage` | Сколько подразделений привязано к участкам ЕЦП |
-| GET | `/api/dictionaries/region-links` | Таблица сопоставления подразделений и участков |
+| GET | `/api/dictionaries/region-links` | Таблица сопоставления подразделений, ФАПов и участков |
 | POST | `/api/dictionaries/region-links` | Привязать или отвязать код подразделения |
 | GET | `/api/dictionaries/region-links/suggest` | Предложения автоматического подбора |
 | POST | `/api/dictionaries/region-links/apply` | Применить автоматический подбор |

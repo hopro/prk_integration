@@ -15,6 +15,8 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
@@ -86,6 +88,19 @@ function LinkRow({
             подразделение закрыто{row.validUntil ? ` (${row.validUntil})` : ''}
           </Typography>
         )}
+        {row.canAttach === false && (
+          <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
+            прикрепление запрещено в справочнике
+          </Typography>
+        )}
+      </TableCell>
+      <TableCell>
+        {/* Подразделение или ФАП — приходят из разных выгрузок ИАС-4. */}
+        <Chip
+          size="small"
+          variant={row.origin === 'ФАП' ? 'outlined' : 'filled'}
+          label={row.origin || '—'}
+        />
       </TableCell>
       <TableCell sx={{ width: 340 }}>
         <Autocomplete
@@ -95,15 +110,13 @@ function LinkRow({
           loading={busy}
           disabled={busy}
           isOptionEqualToValue={(a, b) => a.regionId === b.regionId}
-          getOptionLabel={(o) =>
-            o.descr ? `${o.regionId} · ${o.name} — ${o.descr}` : `${o.regionId} · ${o.name}`
-          }
+          // Идентификатор участка в интерфейсе не показываем: он не несёт
+          // смысла для человека, а нужен только при отправке в ЕЦП.
+          getOptionLabel={(o) => (o.descr ? `${o.name} — ${o.descr}` : o.name)}
           renderOption={(props, option) => (
             <li {...props} key={option.regionId}>
               <Box>
-                <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                  {option.regionId} · {option.name}
-                </Typography>
+                <Typography variant="body2">{option.name}</Typography>
                 {/* Описание участка из ЕЦП: по нему видно, что это за
                     подразделение, когда имя само по себе является кодом. */}
                 {option.descr && option.descr !== option.name && (
@@ -162,6 +175,8 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
     iasLoaded?: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  // По умолчанию показываем только то, к чему ИАС-4 примет прикрепление.
+  const [includeForbidden, setIncludeForbidden] = useState(false);
   const [busy, setBusy] = useState<string>('');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -173,13 +188,13 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
     setLoading(true);
     setError('');
     try {
-      setMatrix(await fetchRegionLinks(lpuId));
+      setMatrix(await fetchRegionLinks(lpuId, includeForbidden));
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось загрузить сопоставление');
     } finally {
       setLoading(false);
     }
-  }, [lpuId]);
+  }, [lpuId, includeForbidden]);
 
   useEffect(() => {
     reload();
@@ -355,6 +370,12 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
             </Box>
             <Box>
               <Typography variant="caption" color="text.secondary">
+                ФАПов среди подразделений
+              </Typography>
+              <Typography variant="h6">{s.faps ?? 0}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
                 Закрытых подразделений
               </Typography>
               <Typography variant="h6" color={s.expired ? 'warning.main' : 'text.primary'}>
@@ -389,6 +410,22 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
             >
               Подобрать автоматически
             </Button>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={includeForbidden}
+                  onChange={(e) => setIncludeForbidden(e.target.checked)}
+                  disabled={busy !== ''}
+                />
+              }
+              label={
+                <Typography variant="caption">
+                  показать запрещённые
+                  {s.hiddenForbidden ? ` (${s.hiddenForbidden})` : ''}
+                </Typography>
+              }
+            />
           </Stack>
 
           {suggestions && suggestions.length > 0 && (
@@ -469,29 +506,16 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ width: 130 }}>Код участка ЕЦП</TableCell>
-                    <TableCell>Название</TableCell>
-                    <TableCell sx={{ width: 220 }}>Подходит для кода</TableCell>
+                    <TableCell>Участок ЕЦП</TableCell>
+                    <TableCell sx={{ width: 240 }}>Описание (LpuRegion_Descr)</TableCell>
+                    <TableCell sx={{ width: 200 }}>Подходит для кода</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {freeRegions.map((region) => (
                     <TableRow key={region.regionId} hover>
-                      <TableCell sx={{ fontFamily: 'monospace' }}>{region.regionId}</TableCell>
-                      <TableCell>
-                        {region.name}
-                        {/* Описание участка из ЕЦП — по нему подразделение
-                            узнаётся, когда имя является кодом. */}
-                        {region.descr && region.descr !== region.name && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{ display: 'block' }}
-                          >
-                            {region.descr}
-                          </Typography>
-                        )}
-                      </TableCell>
+                      <TableCell sx={{ fontFamily: 'monospace' }}>{region.name}</TableCell>
+                      <TableCell>{region.descr}</TableCell>
                       <TableCell>
                         {region.linkedBy ? (
                           <Chip size="small" variant="outlined" label={region.linkedBy} />
@@ -520,8 +544,9 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ width: 110 }}>Код ИАС-4</TableCell>
+                    <TableCell sx={{ width: 100 }}>Код ИАС-4</TableCell>
                     <TableCell>Название подразделения</TableCell>
+                    <TableCell sx={{ width: 110 }}>Источник</TableCell>
                     <TableCell>Участок ЕЦП</TableCell>
                     <TableCell sx={{ width: 190 }}>Способ</TableCell>
                     <TableCell sx={{ width: 90 }} />
@@ -541,7 +566,7 @@ export default function RegionLinksPage({ lpuId }: { lpuId: string }) {
                   ))}
                   {!visible.length && (
                     <TableRow>
-                      <TableCell colSpan={5}>
+                      <TableCell colSpan={6}>
                         <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
                           {rows.length
                             ? 'Ничего не найдено'

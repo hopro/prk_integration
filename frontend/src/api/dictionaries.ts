@@ -114,8 +114,13 @@ export async function uploadDictionaryXml(
 
 // ------------------------------------------ сопоставление подразделений и участков
 
-export async function fetchRegionLinks(lpuId: string): Promise<RegionLinksMatrix> {
-  const response = await client.get<RegionLinksMatrix>('/region-links', { params: { lpuId } });
+export async function fetchRegionLinks(
+  lpuId: string,
+  includeForbidden = false,
+): Promise<RegionLinksMatrix> {
+  const response = await client.get<RegionLinksMatrix>('/region-links', {
+    params: { lpuId, includeForbidden },
+  });
   return response.data;
 }
 

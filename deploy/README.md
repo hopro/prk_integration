@@ -48,7 +48,7 @@ open http://<host>:3001
 каталог `./tfoms` рядом с `docker-compose.yml`:
 
 ```
-tfoms/SPSMO.zip  SPSMO.zip  SPDEPT.xml
+tfoms/SPSMO.zip  SPSMO.zip  SPDEPT.xml  SPSUBDEPT.xml
 ```
 
 Дальше они подхватятся автоматически: кнопка «Загрузить» на вкладке

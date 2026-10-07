@@ -23,7 +23,7 @@
 import datetime
 import logging
 
-from app.services import dict_db, region_match
+from app.services import dict_db, region_match, settings_db
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ def resolve(
     podr: str,
     regions: list[dict],
     links: dict[str, dict] | None = None,
+    dept_name: str = "",
 ) -> tuple[dict | None, str]:
     """Возвращает участок ЕЦП для кода подразделения и способ сопоставления.
 
@@ -74,7 +75,7 @@ def resolve(
         )
         return None, "привязанный участок не найден в ЕЦП"
 
-    region, how = region_match.match_region(regions, code)
+    region, how = region_match.match_region(regions, code, dept_name)
     if region is None:
         return None, HOW_NOT_FOUND
     return region, f"автоматически ({how})"
@@ -115,17 +116,106 @@ def diagnose(
     )
 
 
-def mo_entries(mo: str = "") -> list[dict]:
-    """Подразделения ИАС-4 того МО, который задан в настройках.
+# Подразделения и ФАПы живут в двух выгрузках с разным написанием кода МО:
+# для ГП № 4 в SPDEPT это «893», а в SPSUBDEPT — «660893». Коды подразделений
+# при этом не пересекаются, поэтому таблица связей остаётся одна.
+IAS_DEPT_KINDS = ("spdept", "spsubdept")
 
-    Сопоставлять нужно только свои подразделения: в выгрузке 159 медицинских
+
+def _mo_code(mo: str = "") -> str:
+    """Код медицинской организации: из запроса, иначе из настроек."""
+    return (mo or "").strip().lstrip("0") or (
+        settings_db.get_settings().get("defaultMo") or ""
+    ).strip().lstrip("0")
+
+
+def _mo_scope(kind: str, mo: str) -> str:
+    """Код МО в справочнике вида `kind`.
+
+    Для подразделений ищем точное совпадение, для ФАПов — по окончанию кода:
+    в SPSUBDEPT код записан длиннее на 3 цифры региона. Окончание ищется при
+    коде от трёх цифр и только если совпадение единственное, иначе подразделения
+    чужих организаций попали бы в список.
+    """
+    code = _mo_code(mo)
+    if not code:
+        return ""
+    scopes = [r["scope"] for r in dict_db.entry_scopes(kind) if r["scope"]]
+    if code in scopes:
+        return code
+    if kind == "spsubdept" and len(code) >= 3:
+        matches = [s for s in scopes if s.endswith(code)]
+        if len(matches) == 1:
+            return matches[0]
+    return ""
+
+
+def mo_entries(mo: str = "", include_forbidden: bool = False) -> list[dict]:
+    """Подразделения и ФАПы того МО, который задан в настройках.
+
+    Сопоставлять нужно только свои подразделения: в выгрузках 159 медицинских
     организаций, и чужие коды в таблице сопоставления только мешают.
     """
-    code = (mo or "").strip().lstrip("0")
-    rows = dict_db.get_entries("spdept", code)
-    if rows:
-        return rows
-    return dict_db.get_entries("spdept")
+    result: list[dict] = []
+    for kind in IAS_DEPT_KINDS:
+        scope = _mo_scope(kind, mo)
+        # По умолчанию показываем только то, к чему ИАС-4 вообще примет
+        # прикрепление: подразделения с PRKYES=0 он отклоняет с кодом 502.
+        rows = dict_db.get_entries(kind, scope, attachable_only=not include_forbidden)
+        for row in rows:
+            row["kind"] = kind
+        result += rows
+    return result
+
+
+# Подпись источника подразделения: обычное подразделение или ФАП.
+KIND_LABELS = {"spdept": "подразделение", "spsubdept": "ФАП"}
+
+
+def picker_entries(mo: str = "") -> tuple[list[dict], dict]:
+    """Подразделения для формы прикрепления: действующие и пригодные.
+
+    ИАС-4 принимает в поле podr коды из обоих справочников, поэтому ФАПы стоят
+    рядом с обычными подразделениями и различаются пометкой источника.
+    Закрытые (DEND в прошлом) и запрещённые (PRKYES=0) отсекаются: ИАС-4
+    отклонит их с кодом 501 или 502.
+
+    Возвращает записи и сводку: всего в справочниках МО, сколько пригодно.
+    """
+    today = datetime.date.today().isoformat()
+    mo_code = _mo_code(mo)
+    result: list[dict] = []
+    total = 0
+    for kind in IAS_DEPT_KINDS:
+        scope = _mo_scope(kind, mo)
+        rows = dict_db.get_entries(kind, scope)
+        total += len(rows)
+        for row in rows:
+            valid_until = row.get("valid_until") or ""
+            if valid_until not in ("", "9999-12-31") and valid_until < today:
+                continue
+            if (row.get("can_attach") or "") == "0":
+                continue
+            result.append({**row, "kind": kind, "source": KIND_LABELS.get(kind, kind)})
+    result.sort(key=lambda r: r["name"])
+    return result, {"total": total, "actual": len(result), "mo": mo_code}
+
+
+def dept_name(podr: str, mo: str = "") -> str:
+    """Название подразделения ИАС-4 по его коду.
+
+    Нужно при отправке прикрепления: без привязки участок ищется по коду и по
+    названию, а у ФАПов код в ЕЦП не встречается.
+    """
+    code = (podr or "").strip()
+    if not code:
+        return ""
+    for kind in IAS_DEPT_KINDS:
+        scope = _mo_scope(kind, mo)
+        for row in dict_db.get_entries(kind, scope, search=code):
+            if (row.get("code") or "").strip() == code:
+                return row.get("name") or ""
+    return ""
 
 
 def build_matrix(
@@ -175,12 +265,19 @@ def build_matrix(
         else:
             # Привязки нет — показываем, что предложил бы автоподбор, но не
             # записываем это в базу: решение остаётся за администратором.
-            guess, guess_how = region_match.match_region(regions, code)
+            guess, guess_how = region_match.match_region(
+                regions, code, entry.get("name") or ""
+            )
             how = f"не привязано, автоподбор: {guess_how}" if guess else "не привязано"
 
         rows.append({
             "podr": code,
             "name": entry.get("name") or "",
+            # Подразделение или ФАП — приходят из разных выгрузок. Ключ origin,
+            # потому что source ниже занят видом привязки: manual/auto/unlinked.
+            "origin": KIND_LABELS.get(entry.get("kind", ""), entry.get("source") or ""),
+            "address": entry.get("address") or "",
+            "canAttach": (entry.get("can_attach") or "") != "0",
             "regionId": region_id,
             "regionName": region_match.region_value(region) if region else (link or {}).get("region_name", ""),
             "regionDescr": region_match.region_descr(region) if region else "",
@@ -208,7 +305,7 @@ def build_matrix(
     auto = {}
     for row in rows:
         if not row["linked"] and not row["regionId"]:
-            guess, _ = region_match.match_region(regions, row["podr"])
+            guess, _ = region_match.match_region(regions, row["podr"], row["name"])
             if guess:
                 auto[region_match.region_id(guess)] = row["podr"]
     for item in free:
@@ -232,6 +329,8 @@ def build_matrix(
             "regionsUsed": len(used),
             "regionsFree": len(free),
             "expired": sum(1 for r in rows if not r["actual"]),
+            "forbidden": sum(1 for e in ias if (e.get("can_attach") or "") == "0"),
+            "faps": sum(1 for r in rows if r["origin"] == KIND_LABELS["spsubdept"]),
             "linkedExpired": linked_expired,
         },
     }
@@ -256,7 +355,11 @@ def suggest(lpu_id: str, regions: list[dict], ias: list[dict]) -> list[dict]:
         valid_until = entry.get("valid_until") or ""
         if valid_until not in ("", "9999-12-31") and valid_until < today:
             continue  # закрытое подразделение предлагать незачем
-        region, how = region_match.match_region(regions, code)
+        if (entry.get("can_attach") or "") == "0":
+            continue  # ИАС-4 отклонит такое прикрепление с кодом 502
+        region, how = region_match.match_region(
+            regions, code, entry.get("name") or ""
+        )
         if region is None:
             continue
         region_id = region_match.region_id(region)

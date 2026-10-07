@@ -13,17 +13,19 @@ KINDS = {
     "spmo": "Медицинские организации (СПМО)",
     "spsmo": "Страховые компании (СМО)",
     "spdept": "Подразделения МО (справочник ИАС-4)",
+    "spsubdept": "ФАПы и прочие подразделения (SPSUBDEPT)",
 }
 
 # Справочники ТФОМС: приходят XML-выгрузкой. Участки ЛПУ сюда не входят — они
 # принадлежат конкретному ЛПУ и приходят только из ЕЦП.
-TFOMS_KINDS = {"spmo", "spsmo", "spdept"}
+TFOMS_KINDS = {"spmo", "spsmo", "spdept", "spsubdept"}
 
 # Имя файла-признак для каждого XML-справочника.
 TFOMS_FILES = {
     "spsmo": "SPSMO.zip",
     "spmo": "SPMO.zip",
     "spdept": "SPDEPT.xml",
+    "spsubdept": "SPSUBDEPT.xml",
 }
 
 
@@ -85,6 +87,9 @@ def init_db():
             extra     TEXT NOT NULL DEFAULT '',
             loaded_at TEXT NOT NULL,
             valid_until TEXT NOT NULL DEFAULT '',
+            -- can_attach — признак PRKYES из выгрузки ИАС-4: «разрешено
+            -- прикрепление». Пусто значит «в выгрузке не указан».
+            can_attach TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (kind, scope, code)
         );
 
@@ -141,6 +146,8 @@ def init_db():
         conn.execute("ALTER TABLE dict_entries ADD COLUMN extra TEXT NOT NULL DEFAULT ''")
     if not any(row["name"] == "valid_until" for row in conn.execute("PRAGMA table_info(dict_entries)")):
         conn.execute("ALTER TABLE dict_entries ADD COLUMN valid_until TEXT NOT NULL DEFAULT ''")
+    if not any(row["name"] == "can_attach" for row in conn.execute("PRAGMA table_info(dict_entries)")):
+        conn.execute("ALTER TABLE dict_entries ADD COLUMN can_attach TEXT NOT NULL DEFAULT ''")
     # СПФМО удалён из системы: код его записей больше не используется, но
     # в базах, где он грузился раньше, лежат 158 тысяч строк.
     stale = [kind for kind in ("spdiv",) if kind not in KINDS]
@@ -251,14 +258,15 @@ def save_entries(kind: str, scope: str, entries: list[dict]) -> int:
             str(e.get("extra") or "").strip(),
             now,
             str(e.get("valid_until") or "").strip(),
+            str(e.get("can_attach") or "").strip(),
         )
         for e in entries
         if str(e.get("code") or "").strip()
     ]
     conn.executemany(
         "INSERT OR REPLACE INTO dict_entries "
-        "(kind, scope, code, name, extra, loaded_at, valid_until) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(kind, scope, code, name, extra, loaded_at, valid_until, can_attach) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         rows,
     )
     unique = len({(row[1], row[2]) for row in rows})
@@ -275,10 +283,11 @@ def count_entries(
     search: str = "",
     mo: str = "",
     valid_from: str = "",
+    attachable_only: bool = False,
 ) -> int:
     """Сколько записей подходит под фильтр. Считается тем же запросом, что и
     выборка, иначе счётчик на странице расходился бы с таблицей."""
-    where, params = _entry_filters(kind, scope, search, mo, valid_from)
+    where, params = _entry_filters(kind, scope, search, mo, valid_from, attachable_only)
     conn = _get_conn()
     total = conn.execute(
         f"SELECT COUNT(*) AS n FROM dict_entries {where}", params
@@ -295,11 +304,12 @@ def get_entries(
     offset: int = 0,
     mo: str = "",
     valid_from: str = "",
+    attachable_only: bool = False,
 ) -> list[dict]:
-    where, params = _entry_filters(kind, scope, search, mo, valid_from)
+    where, params = _entry_filters(kind, scope, search, mo, valid_from, attachable_only)
     sql = (
-        "SELECT code, name, extra, scope, loaded_at, valid_until FROM dict_entries "
-        f"{where} ORDER BY name"
+        "SELECT code, name, extra, scope, loaded_at, valid_until, can_attach "
+        f"FROM dict_entries {where} ORDER BY name"
     )
     if limit:
         sql += " LIMIT ? OFFSET ?"
@@ -316,6 +326,7 @@ def _entry_filters(
     search: str,
     mo: str = "",
     valid_from: str = "",
+    attachable_only: bool = False,
 ) -> tuple[str, list]:
     """Общие условия выборки для подсчёта и для выдачи страницы.
 
@@ -337,15 +348,33 @@ def _entry_filters(
         # но ИАС-4 их больше не принимает. Записи без срока считаем действующими.
         where += " AND (valid_until = '' OR valid_until >= ?)"
         params.append(valid_from)
+    if attachable_only:
+        # PRKYES из выгрузки. У ФАПов и подразделений он равен 0, а ИАС-4 такие
+        # отклоняет с 502 «у участка МО отсутствует признак Разрешено
+        # прикрепление». Пусто — признак в выгрузке не указан, считаем
+        # разрешённым, иначе часть справочников отсечётся целиком.
+        where += " AND can_attach != '0'"
     return where, params
 
 
-def entry_scopes() -> list[dict]:
+def entry_scopes(kind: str = "") -> list[dict]:
+    """Области справочников: вид, код МО и число записей.
+
+    Нужен, чтобы найти код МО из настроек в справочнике ФАПов: там код записан
+    длиннее, чем в справочнике подразделений (для ГП № 4 — 660893 против 893),
+    поэтому код ищется сравнением по окончанию.
+    """
     conn = _get_conn()
-    rows = conn.execute(
+    sql = (
         "SELECT kind, scope, COUNT(*) AS rows_loaded, MAX(loaded_at) AS loaded_at "
-        "FROM dict_entries GROUP BY kind, scope ORDER BY kind, scope"
-    ).fetchall()
+        "FROM dict_entries"
+    )
+    params: list = []
+    if kind:
+        sql += " WHERE kind = ?"
+        params.append(kind)
+    sql += " GROUP BY kind, scope ORDER BY kind, scope"
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

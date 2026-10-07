@@ -58,8 +58,13 @@ async def load_prk(request: LoadPrkRequest):
                 regions = _unwrap_regions(regions_resp)
 
             # Ручная привязка важнее автоподбора: у ЕЦП и ИАС-4 разные
-            # нумерации, и угадывать соответствие по названию ненадёжно.
-            region, how = region_links.resolve(mis_lpu_id, podr, regions)
+            # нумерации. Название подразделения нужно, чтобы найти участок у
+            # ФАПов: их коды в ЕЦП не встречаются, совпадение есть только по
+            # названию.
+            region, how = region_links.resolve(
+                mis_lpu_id, podr, regions,
+                dept_name=region_links.dept_name(podr, mis_cfg.get("defaultMo", "")),
+            )
             if region is not None:
                 logger.info("Attachment podr=%s matched region %s (%s)", podr,
                             region_match.region_value(region), how)

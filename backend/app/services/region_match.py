@@ -23,6 +23,14 @@ _SUFFIX_RE = re.compile(r"_[А-ЯЁA-Z][А-ЯЁA-Zа-яёa-z0-9]*$")
 _TAIL_CODE_RE = re.compile(r"[\s_]*\d[\d_]*[А-ЯЁA-Zа-яёa-z]*\s*$")
 # Хвостовые цифры — собственно код участка.
 _TAIL_DIGITS_RE = re.compile(r"(\d+)\s*$")
+# Все цифровые фрагменты в названии участка: «Мобильный ФАП 235209_ГРП» → 235209.
+_NAME_DIGITS_RE = re.compile(r"\d{4,}")
+# Название без пробелов, точек и знаков препинания: «Модульный ФАП п. Зональный»
+# и «Модульный ФАП п.Зональный» — одно и то же подразделение, записанное в
+# двух справочниках по-разному.
+_SQUASH_RE = re.compile(r"[^0-9a-zа-яё]+")
+# Минимальная длина фрагмента: три цифры в названии участка — это его номер,
+# а не код подразделения, и такие совпадения только мешают.
 
 
 def normalize(value: str) -> str:
@@ -55,6 +63,11 @@ def region_value(region: dict) -> str:
 
 def region_id(region: dict) -> str:
     return str(region.get("region_id") or region.get("LpuRegion_id") or "").strip()
+
+
+def squash(value: str) -> str:
+    """Название для сравнения: без пробелов, точек и знаков препинания."""
+    return _SQUASH_RE.sub("", (value or "").lower())
 
 
 def region_descr(region: dict) -> str:
@@ -90,29 +103,64 @@ def region_code(value: str) -> str | None:
     return tail.group(1) if tail else None
 
 
-def match_region(regions: list[dict], podr: str) -> tuple[dict | None, str]:
-    """Ищет участок по коду подразделения.
+def match_region(
+    regions: list[dict],
+    podr: str,
+    dept_name: str = "",
+) -> tuple[dict | None, str]:
+    """Ищет участок по коду подразделения и, если есть, по его названию.
 
     Возвращает (участок, способ сопоставления). Способ нужен для диагностики:
     по нему видно, почему участок не нашёлся или почему найден «похожий».
+
+    dept_name — название подразделения из справочника ИАС-4. Оно нужно для
+    ФАПов: их коды в ЕЦП не встречаются вовсе (имя участка — «523102_ГРП»), и
+    совпадение находится только по названию: «ФАП д. Старая Паньшина».
     """
     target = (podr or "").strip()
     if not target or not regions:
         return None, "нет данных"
 
-    # 1. Точное совпадение как есть — самый частый случай.
+    # 1. Цифры из названия участка. Имя в ЕЦП — это код: «21100», «31400_ГП3».
+    #    Сравнение цифр находит подразделение даже тогда, когда в имени есть
+    #    суффикс или текст.
+    for region in regions:
+        if target in _NAME_DIGITS_RE.findall(region_value(region)):
+            return region, "цифры из названия участка"
+
+    # 2. Название подразделения против названия и описания участка. Так
+    #    находятся ФАПы, медкабинеты и всё, что названо словами.
+    wanted_text = squash(dept_name)
+    if wanted_text and not wanted_text.isdigit():
+        for region in regions:
+            if squash(region_value(region)) == wanted_text:
+                return region, "название подразделения"
+        for region in regions:
+            value = squash(region_descr(region))
+            if value and value == wanted_text:
+                return region, "название подразделения в описании участка"
+        for region in regions:
+            for value in (squash(region_value(region)), squash(region_descr(region))):
+                # Короткие общие слова вроде «Терапевтический» нашлись бы
+                # сотни раз, поэтому короткое совпадение пропускаем.
+                if len(value) >= 14 and (
+                    value.startswith(wanted_text) or wanted_text.startswith(value)
+                ):
+                    return region, "совпадение начала названия подразделения"
+
+    # 3. Точное совпадение как есть.
     for region in regions:
         if region_value(region) == target:
             return region, "точное"
 
-    # 2. Нормализованное совпадение (падеж регистра, суффикс _ГП3, хвостовой код).
+    # 4. Нормализованное совпадение (падеж регистра, суффикс _ГП3, хвостовой код).
     wanted = normalize(target)
     if wanted:
         for region in regions:
             if normalize(region_value(region)) == wanted:
                 return region, "нормализованное"
 
-    # 3. Подразделение ИАС могло прийти с префиксом МО: 700200 → 200.
+    # 5. Подразделение ИАС могло прийти с префиксом МО: 700200 → 200.
     digits = re.findall(r"\d+", target)
     for value in digits:
         tail = value.lstrip("0")
@@ -121,8 +169,9 @@ def match_region(regions: list[dict], podr: str) -> tuple[dict | None, str]:
                 if normalize(region_value(region)) == tail:
                     return region, "хвост кода без ведущих нулей"
 
-    # 4. То же самое по описанию участка: имя в ЕЦП бывает кодом, а смысл
-    #    подразделения живёт в описании.
+    # 6. Описание участка: имя бывает кодом или вовсе чужим, а смысл подразделения
+    #    живёт в LpuRegion_Descr. Именно по описанию находятся ФАПы: их имена в
+    #    ЕЦП — это коды вида 523102_ГРП, которых нет в справочнике ФАПов.
     wanted_descr = normalize(target)
     for region in regions:
         if region_descr(region) == target:
@@ -132,7 +181,7 @@ def match_region(regions: list[dict], podr: str) -> tuple[dict | None, str]:
         if value and value == wanted_descr:
             return region, "нормализованное описание участка"
 
-    # 5. Совпадение по вхождению — только для текстовых названий. Для чистых
+    # 7. Совпадение по вхождению — только для текстовых названий. Для чистых
     #    кодов это даёт ложные срабатывания: «530200» входит в «30200».
     is_code = wanted.isdigit()
     if wanted and not is_code:

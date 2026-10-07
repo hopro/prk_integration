@@ -12,7 +12,7 @@
 #   1. cp .env.example .env
 #   2. отредактировать .env (пароли БД, JWT-ключ, GATEWAY_LOGIN/PASSWORD)
 #   3. положить выгрузки в ./tfoms:
-#        SPSMO.zip  SPMO.zip  SPDEPT.xml
+#        SPSMO.zip  SPMO.zip  SPDEPT.xml  SPSUBDEPT.xml
 #        SPDEPT.xml — обязателен, это коды подразделений для поля podr
 #
 # Backend обращается к шлюзу по имени сервиса `gateway`. Если шлюз запущен
@@ -153,7 +153,7 @@ services:
       # SQLite с паролями, справочниками и историей. Путь задаётся в .env:
       # в репозитории это backend/data, в собранном комплекте — ./data.
       - ${DATA_DIR:-./backend/data}:/app/app/data
-      # XML-выгрузки справочников: SPSMO.zip, SPMO.zip, SPDEPT.xml.
+      # XML-выгрузки справочников: SPSMO.zip, SPMO.zip, SPDEPT.xml, SPSUBDEPT.xml.
       - ./tfoms:/app/tfoms:ro
     # Backend ходит в шлюз по имени сервиса `gateway`. Если шлюз не поднялся,
     # имя не разрешается, и любое обращение к ЕЦП падает с ConnectTimeout.

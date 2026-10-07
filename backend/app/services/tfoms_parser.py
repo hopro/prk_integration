@@ -33,6 +33,9 @@ KINDS = {
 FILE_MARKERS = {
     "spsmo": ("spsmo",),
     "spmo": ("spmo",),
+    # SPSUBDEPT проверяется раньше SPDEPT намеренно: записи у них одинаковые,
+    # различается только имя файла, и «spsubdept» не содержит «spdept».
+    "spsubdept": ("spsubdept", "subdept", "sp_subdept", "fap", "fap'"),
     "spdept": ("spdept", "spmo_div", "podrazd"),
 }
 
@@ -44,8 +47,9 @@ _CODE_RE = re.compile(r"^(\d+)")
 def detect_kind(filename: str, xml_text_head: str) -> str:
     """Определяет вид справочника по имени файла, затем по содержимому.
 
-    Имя надёжнее содержимого: в выгрузке СПМО много полей, и подразделения
-    ИАС-4 легко спутать с медицинскими организациями.
+    Имя надёжнее содержимого: в выгрузке СПМО много похожих полей, а
+    подразделения ИАС-4 (SPDEPT) и ФАПы (SPSUBDEPT) содержанием неразличимы
+    вовсе — их различает только имя файла.
     """
     lowered = filename.lower()
     for kind, markers in FILE_MARKERS.items():
@@ -186,8 +190,13 @@ _IAS_NAME_FIELDS = ("NAME", "PODRNAME", "NAMEPODR", "NAME_PODR", "TITLE", "NAIME
 _IAS_MO_FIELDS = ("MO", "MO_CODE", "CODE_MO", "KODMO", "LPU")
 
 
-def parse_spdept(xml_text: str) -> list[dict]:
-    """Подразделения ИАС-4: код podr и наименование.
+def parse_spdept(xml_text: str, with_address: bool = False) -> list[dict]:
+    """Подразделения ИАС-4: код podr, название, срок действия и признак прикрепления.
+
+    Разбор общий для двух справочников — SPDEPT (подразделения МО) и SPSUBDEPT
+    (ФАПы, медкабинеты, дневные стационары). Формат записей у них одинаковый,
+    отличается лишь набор дополнительных полей: у SPSUBDEPT есть `DEPT` и
+    `ADDRESS`, и адрес там заполнен у большинства записей.
 
     Это единственный источник кодов, которые ИАС-4 принимает в поле podr.
     Список участков ЕЦП для этой цели не годится: там своя нумерация, и все
@@ -216,7 +225,7 @@ def parse_spdept(xml_text: str) -> list[dict]:
 
         # Короткое и полное названия есть по-разному: LONGNAME подробнее
         # («Терапевтический участок №6» против «Участок №6»), и именно оно
-        # ближе к тому, как участок назван в ЕЦП.
+        # ближе к тому, как подразделение названо в ЕЦП.
         short = ""
         for field in _IAS_NAME_FIELDS:
             if (keys.get(field) or "").strip():
@@ -230,18 +239,40 @@ def parse_spdept(xml_text: str) -> list[dict]:
         valid_until = _parse_date(keys.get("DEND") or keys.get("DATEEND") or "")
 
         # PRKYES — тот самый признак «разрешено прикрепление», на который ИАС-4
-        # отвечает ошибкой 502.
+        # отвечает ошибкой 502. В SPSUBDEPT у 31 подразделения из 52 он равен 0,
+        # поэтому признак хранится отдельно, а не в тексте.
         prkyes = (keys.get("PRKYES") or "").strip()
-        allow = "" if prkyes in ("", "0") else " · прикрепление разрешено"
+        can_attach = "" if prkyes == "" else ("0" if prkyes == "0" else "1")
+
+        parts = [f"КОД {code}"]
+        if short and short != name:
+            parts.append(short)
+        address = (keys.get("ADDRESS") or "").strip()
+        if with_address and address:
+            parts.append(address)
+        dept = (keys.get("DEPT") or "").strip()
+        if with_address and dept and dept != "0":
+            parts.append(f"уровень {dept}")
 
         rows.append({
             "code": code,
             "name": name,
             "scope": mo,                       # область = код МО
-            "extra": f"КОД {code}" + (f" · {short}" if short and short != name else "") + allow,
+            "extra": " · ".join(parts),
             "valid_until": valid_until,
+            "can_attach": can_attach,
         })
     return rows
+
+
+def parse_spsubdept(xml_text: str) -> list[dict]:
+    """ФАПы и прочие подразделения: тот же формат, но с адресом и уровнем.
+
+    Отдельная функция нужна только для читаемости: формат записи тот же, что у
+    SPDEPT, и отличить их по содержимому невозможно — вид определяется именем
+    файла.
+    """
+    return parse_spdept(xml_text, with_address=True)
 
 
 def _parse_date(value: str) -> str:
@@ -267,6 +298,7 @@ PARSERS = {
     "spsmo": parse_spsmo,
     "spmo": parse_spmo,
     "spdept": parse_spdept,
+    "spsubdept": parse_spsubdept,
 }
 
 
@@ -295,7 +327,8 @@ def parse_upload(filename: str, raw: bytes, encoding_hint: str = "") -> tuple[st
     if kind is None:
         raise ValueError(
             "Не удалось определить вид справочника. Ожидается SPSMO.zip, "
-            "SPMO.zip или SPDEPT.xml"
+            "SPMO.zip, SPDEPT.xml или SPSUBDEPT.xml — по содержимому ФАПы "
+            "не отличить от обычных подразделений, важно имя файла."
         )
 
     rows = PARSERS[kind](text)

@@ -96,7 +96,11 @@ export default function AttachmentForm({
         loading={deptLoading}
         value={selectedDept}
         onChange={(_, newValue) => set('podr', newValue ? newValue.code : '')}
-        getOptionLabel={(option) => `${option.code} — ${option.name}`}
+        // Пометка источника нужна, чтобы ФАП не путать с обычным участком:
+        // коды приходят из разных выгрузок ИАС-4.
+        getOptionLabel={(option) =>
+          option.source ? `${option.code} — ${option.name} · ${option.source}` : `${option.code} — ${option.name}`
+        }
         filterOptions={(options, state) => {
           const needle = state.inputValue.trim().toLowerCase();
           if (!needle) return options.slice(0, 200);

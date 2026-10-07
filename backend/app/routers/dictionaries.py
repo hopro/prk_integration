@@ -22,6 +22,7 @@ SOURCES = {
     "spmo": "tfoms",
     "spsmo": "tfoms",
     "spdept": "tfoms",
+    "spsubdept": "tfoms",
 }
 
 
@@ -297,13 +298,33 @@ def _link_lpu_id(lpuId: str) -> str:
 
 
 @router.get("/region-links")
-async def region_links_matrix(lpuId: str = Query("", alias="lpuId")):
-    """Таблица сопоставления: коды подразделений ИАС-4 и участки ЕЦП."""
+async def region_links_matrix(
+    lpuId: str = Query("", alias="lpuId"),
+    includeForbidden: bool = Query(False),
+):
+    """Таблица сопоставления: коды подразделений ИАС-4 и участки ЕЦП.
+
+    По умолчанию показываются подразделения, к которым ИАС-4 примет
+    прикрепление: без признака «разрешено прикрепление» он отвечает 502.
+    Закрытые по сроку действия видны всегда, но помечены.
+    """
     lpu_id = _link_lpu_id(lpuId)
     regions = dict_db.get_regions(lpu_id)
-    ias = region_links.mo_entries((settings_db.get_settings().get("defaultMo") or ""))
+    ias = region_links.mo_entries(
+        (settings_db.get_settings().get("defaultMo") or ""),
+        include_forbidden=includeForbidden,
+    )
     matrix = region_links.build_matrix(lpu_id, regions, ias)
     matrix["mo"] = (settings_db.get_settings().get("defaultMo") or "").strip().lstrip("0")
+    # Сколько подразделений скрыто переключателем: без этого числа администратор
+    # не понимает, много ли ещё запрещённых осталось за кадром.
+    if not includeForbidden:
+        hidden = region_links.mo_entries(
+            (settings_db.get_settings().get("defaultMo") or ""), include_forbidden=True
+        )
+        matrix["summary"]["hiddenForbidden"] = len(hidden) - len(ias)
+    else:
+        matrix["summary"]["hiddenForbidden"] = 0
     matrix["regionsLoaded"] = bool(regions)
     matrix["iasLoaded"] = bool(ias)
     if not regions:
@@ -369,7 +390,10 @@ async def suggest_region_links(lpuId: str = Query("", alias="lpuId")):
     """Что предложил бы автоматический подбор. Ничего не сохраняет."""
     lpu_id = _link_lpu_id(lpuId)
     regions = dict_db.get_regions(lpu_id)
-    ias = region_links.mo_entries((settings_db.get_settings().get("defaultMo") or ""))
+    ias = region_links.mo_entries(
+        (settings_db.get_settings().get("defaultMo") or ""),
+        include_forbidden=True,
+    )
     items = region_links.suggest(lpu_id, regions, ias)
     return {
         "lpuId": lpu_id,

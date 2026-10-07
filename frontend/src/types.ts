@@ -190,6 +190,8 @@ export interface SpDeptEntry {
   name: string;
   /** Название участка в ЕЦП — может отличаться от name. */
   ecpName?: string;
+  /** Откуда код: обычное подразделение ИАС-4 или ФАП (SPSUBDEPT). */
+  source?: string;
 }
 
 export interface InsCheckResponse {
@@ -299,7 +301,13 @@ export interface RegionLinkRow {
   regionName: string;
   /** Описание участка из ЕЦП (LpuRegion_Descr). */
   regionDescr?: string;
+  /** Вид привязки: вручную, автоматически, отвязано. */
   source: '' | 'manual' | 'auto' | 'unlinked';
+  /** Откуда код: обычное подразделение или ФАП. */
+  origin?: string;
+  /** Разрешено ли прикрепление по признаку PRKYES из выгрузки ИАС-4. */
+  canAttach?: boolean;
+  address?: string;
   updatedAt: string;
   how: string;
   linked: boolean;
@@ -333,6 +341,10 @@ export interface RegionLinksMatrix {
     regionsFree: number;
     expired: number;
     linkedExpired: number;
+    /** Сколько подразделений скрыто переключателем «показать запрещённые». */
+    hiddenForbidden?: number;
+    /** Сколько ФАПов среди подразделений. */
+    faps?: number;
   };
   regionsLoaded: boolean;
   iasLoaded: boolean;
