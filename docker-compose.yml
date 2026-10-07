@@ -47,14 +47,11 @@ services:
       - gateway_data
     healthcheck:
       # pg_isready успевает ещё во время инициализации, когда роль ещё не создана:
-      # шлюз стартует и падает с «password authentication failed». Поэтому
-      # проверяем не только то, что принимает соединения,, но и реальный вход под своим паролем.
-      test:
-        - "CMD-SHELL"
-        - >-
-          pg_isready -U ${GATEWAY_DB_USER:-mis_gateway} -d ${GATEWAY_DB_NAME:-mis_gateway}
-          && psql -U ${GATEWAY_DB_USER:-mis_gateway} -d ${GATEWAY_DB_NAME:-mis_gateway}
-             -c "SELECT 1" > /dev/null
+      # шлюз стартует по этому сигналу и падает с «password authentication failed».
+      # Поэтому проверяем не только приём соединений, но и реальное выполнение
+      # запроса. Команда обязана быть одной строкой: перенос внутри YAML рвёт её
+      # на части, и sh принимает «-c» за отдельную команду.
+      test: ["CMD-SHELL", "pg_isready -U ${GATEWAY_DB_USER:-mis_gateway} -d ${GATEWAY_DB_NAME:-mis_gateway} && psql -U ${GATEWAY_DB_USER:-mis_gateway} -d ${GATEWAY_DB_NAME:-mis_gateway} -tAc 'SELECT 1' >/dev/null"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -181,15 +178,20 @@ services:
       - app
 
 networks:
+  # Имена сетей, как и имя проекта, берутся из имени каталога. Задавать их
+  # явно нельзя: с фиксированным именем две установки на одном сервере
+  # оказываются в одной сети, и DNS отдаёт frontend чужой backend. Выглядит
+  # это как «всё работает, но версия старая и настройки чужие».
+  #
   # Сеть приложения: frontend, backend, шлюз. Имена сервисов в ней и есть
   # адреса друг друга, поэтому backend обращается к шлюзу как к `gateway:8010`.
   app:
-    name: prk_app
+    driver: bridge
 
   # Сеть данных шлюза. internal: true — у баз нет выхода в интернет и они
   # недоступны извне; в эту сеть подключён только шлюз.
   gateway_data:
-    name: prk_gateway_data
+    driver: bridge
     internal: true
 
 volumes:
