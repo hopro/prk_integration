@@ -13,15 +13,46 @@ Frontend (React + MUI)  ──HTTP──▶  Backend (FastAPI)  ──SOAP──
                                      tfoms/SPMO.zip, SPSMO.zip, SPFMODIVISION.zip, SPDEPT.xml
 ```
 
-## Быстрый запуск
+## Развёртывание и обновление
+
+Полная инструкция для администратора: **[deploy/ИНСТРУКЦИЯ.md](deploy/ИНСТРУКЦИЯ.md)**.
+Текущая версия — в файле [`VERSION`](VERSION), что изменилось — в
+[`CHANGELOG.md`](CHANGELOG.md).
+
+### Установка
 
 ```bash
+git clone <адрес-репозитория> prk_integration
+cd prk_integration
+mkdir -p tfoms && cp /путь/к/файлам/*.zip /путь/к/файлам/*.xml tfoms/
+cp .env.example .env        # задать 4 обязательных значения
 docker compose up -d --build
 ```
 
-- **Приложение:** http://localhost:3001
-- **Бэкенд (API):** http://localhost:8001
-- **Health check:** http://localhost:8001/api/health
+Система откроется на `http://<адрес-сервера>:3001`. Проверка:
+
+```
+http://<адрес-сервера>:3001/api/v1/auth/gateway-health
+```
+
+### Обновление
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Настройки, справочники и история сохраняются: `.env`, каталог `${DATA_DIR}` и
+тома баз не входят в git.
+
+### Переменные окружения
+
+Все настройки — в `.env`, образец в `.env.example`. Обязательны четыре:
+`GATEWAY_DB_PASSWORD`, `JWT_SECRET_KEY`, `GATEWAY_LOGIN`, `GATEWAY_PASSWORD`.
+`MIS_GATEWAY_URL` задавать не нужно — compose подставляет `http://gateway:8010`.
+
+Порты: наружу открыт только интерфейс `APP_PORT` (по умолчанию 3001). Backend и
+шлюз доступны внутри сети compose, на хост не выведены.
 
 ## Страницы приложения
 
