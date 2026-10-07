@@ -43,7 +43,16 @@ async def load_prk(request: LoadPrkRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     mis_save_result = None
-    if result.success and request.mis_save_data:
+    # Отправка в ЕЦП — отдельный этап, и он может не выполняться. Раньше это
+    # было видно только как пустое поле в истории, из-за чего «не отправлялось»
+    # путалось с «отправка завершилась ошибкой».
+    if not result.success:
+        mis_skip_reason = "запись не прошла ИАС-4"
+    elif not request.mis_save_data:
+        mis_skip_reason = "карта пациента в ЕЦП не выбрана"
+    else:
+        mis_skip_reason = None
+    if mis_skip_reason is None:
         try:
             mis_cfg = settings_db.get_settings()
             mis_lpu_id = mis_cfg.get("misLpuId", "13003795")
@@ -104,6 +113,7 @@ async def load_prk(request: LoadPrkRequest):
         result=result.result.model_dump() if result.result else None,
         error_message=result.error_message,
         mis_save=mis_save_result,
+        mis_skip_reason=mis_skip_reason,
     )
 
     return LoadPrkResponse(
@@ -113,6 +123,7 @@ async def load_prk(request: LoadPrkRequest):
         result=result.result,
         error_message=result.error_message,
         mis_save_result=mis_save_result,
+        mis_skip_reason=mis_skip_reason,
     )
 
 

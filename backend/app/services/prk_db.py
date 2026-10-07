@@ -41,7 +41,11 @@ def init_db():
             -- Результат отправки в ЕЦП: раньше он нигде не сохранялся, и
             -- ошибки ЕЦП («String should have at most 8 characters» и подобные)
             -- не были видны ни в истории, ни в статистике.
-            mis_save_json TEXT
+            mis_save_json TEXT,
+            -- Почему в ЕЦП ничего не отправляли. Раньше этот случай и случай
+            -- реальной ошибки отправки выглядели в истории одинаково, и
+            -- «не отправлялось» выглядело как сбой.
+            mis_skip_reason TEXT
         );
 
         CREATE TABLE IF NOT EXISTS prk_attachments (
@@ -58,6 +62,16 @@ def init_db():
     # прошлой версией, её нет.
     if not any(row["name"] == "mis_save_json" for row in conn.execute("PRAGMA table_info(prk_history)")):
         conn.execute("ALTER TABLE prk_history ADD COLUMN mis_save_json TEXT")
+    if not any(row["name"] == "mis_skip_reason" for row in conn.execute("PRAGMA table_info(prk_history)")):
+        conn.execute("ALTER TABLE prk_history ADD COLUMN mis_skip_reason TEXT")
+    # До появления колонки было не видно, почему в ЕЦП ничего не уходило.
+    # Причина восстанавливается точно: если запись прошла ИАС-4, но результата
+    # ЕЦП нет — карта пациента не была выбрана; если не прошла — дело в ИАС-4.
+    conn.execute(
+        """UPDATE prk_history SET mis_skip_reason = CASE WHEN success = 1
+               THEN 'карта пациента в ЕЦП не выбрана' ELSE 'запись не прошла ИАС-4' END
+           WHERE mis_save_json IS NULL AND mis_skip_reason IS NULL"""
+    )
     conn.commit()
     conn.close()
 
@@ -69,12 +83,13 @@ def save_history(
     result: Optional[dict],
     error_message: Optional[str],
     mis_save: Optional[dict] = None,
+    mis_skip_reason: Optional[str] = None,
 ) -> int:
     conn = _get_conn()
     cur = conn.execute(
         """INSERT INTO prk_history (success, error_message, fam, im, ot, dr, vpolis, npolis,
-                                   ack, timeoper, errors_json, mis_save_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                   ack, timeoper, errors_json, mis_save_json, mis_skip_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             int(success),
             error_message,
@@ -88,6 +103,7 @@ def save_history(
             result["timeoper"].isoformat() if result and result.get("timeoper") else None,
             json.dumps([e.model_dump() if hasattr(e, "model_dump") else e for e in result["errors"]], ensure_ascii=False, default=str) if result and result.get("errors") else None,
             json.dumps(mis_save, ensure_ascii=False, default=str) if mis_save else None,
+            mis_skip_reason,
         ),
     )
     history_id = cur.lastrowid
@@ -177,8 +193,10 @@ def get_history(
                 item["misSave"] = None
         else:
             item["misSave"] = None
+        item["misSkipReason"] = item.get("mis_skip_reason")
         item.pop("errors_json", None)
         item.pop("mis_save_json", None)
+        item.pop("mis_skip_reason", None)
         items.append(item)
 
     conn.close()
@@ -199,6 +217,11 @@ def get_stats() -> dict:
     ecp_ok = conn.execute(
         "SELECT COUNT(*) FROM prk_history WHERE mis_save_json LIKE '%\"success\": true%'"
     ).fetchone()[0]
+    # Записи, где отправки в ЕЦП не было вовсе: отдельно от ошибок, иначе
+    # «не отправлялось» выглядит как неудачная отправка.
+    ecp_skipped = conn.execute(
+        "SELECT COUNT(*) FROM prk_history WHERE mis_skip_reason IS NOT NULL"
+    ).fetchone()[0]
     conn.close()
     return {
         "total": total,
@@ -207,6 +230,7 @@ def get_stats() -> dict:
         "ecpAttempted": ecp_attempted,
         "ecpSuccess": ecp_ok,
         "ecpFailed": max(0, ecp_attempted - ecp_ok),
+        "ecpSkipped": ecp_skipped,
     }
 
 

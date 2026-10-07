@@ -38,9 +38,15 @@ function HistoryRow({ item, spmoMap }: RowProps) {
   const statusColor = item.success ? 'success' : 'error';
   const statusText = item.success ? 'Успешно' : (item.error_message ? 'Ошибка' : 'Отказ');
   // ИАС-4 и ЕЦП — разные этапы: запись может уйти в ИАС-4 и не отправиться в ЕЦП.
-  const ecpText = item.misSave == null
-    ? 'ЕЦП: не отправлялось'
-    : (item.misSave.success ? 'ЕЦП: отправлено' : `ЕЦП: ${item.misSave.error || 'ошибка'}`);
+  // Отправка в ЕЦП, её ошибка и полное отсутствие отправки — три разных
+  // состояния: раньше последние два выглядели одинаково.
+  const ecpSent = item.misSave?.success === true;
+  const ecpFailed = item.misSave != null && item.misSave.success !== true;
+  const ecpText = ecpSent
+    ? 'ЕЦП: отправлено'
+    : (ecpFailed
+        ? `ЕЦП: ${item.misSave?.error || 'ошибка отправки'}`
+        : `ЕЦП: не отправлялось (${item.misSkipReason || 'причина не указана'})`);
 
   return (
     <>
@@ -59,8 +65,8 @@ function HistoryRow({ item, spmoMap }: RowProps) {
           <Stack spacing={0.5} alignItems="flex-start">
             <Chip label={statusText} color={statusColor} size="small" variant="outlined" />
             <Chip
-              label={item.misSave?.success ? 'ЕЦП' : 'ЕЦП не отправлено'}
-              color={item.misSave == null ? 'default' : (item.misSave.success ? 'success' : 'warning')}
+              label={ecpSent ? 'ЕЦП: отправлено' : (ecpFailed ? 'ЕЦП: ошибка' : 'ЕЦП: не отправлялось')}
+              color={ecpSent ? 'success' : (ecpFailed ? 'warning' : 'default')}
               size="small"
               variant="outlined"
             />
@@ -200,7 +206,7 @@ export default function StatsPage({ spmoMap }: Props) {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={4}>
+          <Grid item xs={6}>
             <Card sx={{ bgcolor: '#e8f5e9' }}>
               <CardContent>
                 <Typography variant="h4" align="center" color="success.main">{stats.success}</Typography>
@@ -208,7 +214,7 @@ export default function StatsPage({ spmoMap }: Props) {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={4}>
+          <Grid item xs={6}>
             <Card sx={{ bgcolor: '#ffebee' }}>
               <CardContent>
                 <Typography variant="h4" align="center" color="error.main">{stats.failed}</Typography>
@@ -216,7 +222,7 @@ export default function StatsPage({ spmoMap }: Props) {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={6}>
+          <Grid item xs={4}>
             <Card sx={{ bgcolor: stats.ecpSuccess ? '#e8f5e9' : 'grey.100' }}>
               <CardContent>
                 <Typography variant="h4" align="center" color={stats.ecpSuccess ? 'success.main' : 'text.disabled'}>
@@ -228,14 +234,26 @@ export default function StatsPage({ spmoMap }: Props) {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={6}>
+          <Grid item xs={4}>
             <Card sx={{ bgcolor: stats.ecpFailed ? '#fff8e1' : 'grey.100' }}>
               <CardContent>
                 <Typography variant="h4" align="center" color={stats.ecpFailed ? 'warning.main' : 'text.disabled'}>
                   {stats.ecpFailed}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" align="center">
-                  Не отправлено в ЕЦП
+                  Ошибка отправки в ЕЦП
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={4}>
+            <Card sx={{ bgcolor: 'grey.100' }}>
+              <CardContent>
+                <Typography variant="h4" align="center" color="text.disabled">
+                  {stats.ecpSkipped ?? 0}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" align="center">
+                  Без отправки в ЕЦП
                 </Typography>
               </CardContent>
             </Card>

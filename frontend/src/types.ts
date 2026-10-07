@@ -132,6 +132,7 @@ export interface LoadPrkResponse {
   result: ResultData | null;
   error_message: string | null;
   mis_save_result?: any;
+  mis_skip_reason?: string | null;
 }
 
 export interface InsCheckRequest {
@@ -271,6 +272,8 @@ export interface PrkHistoryItem {
   errors: any[];
   /** Результат отправки в ЕЦП: null — отправка не выполнялась. */
   misSave: { success: boolean; error?: string } | null;
+  /** Почему в ЕЦП не отправляли: null — отправка была, но с ошибкой. */
+  misSkipReason: string | null;
   attachments: PrkHistoryAttachment[];
 }
 
@@ -289,6 +292,8 @@ export interface PrkStats {
   ecpAttempted: number;
   ecpSuccess: number;
   ecpFailed: number;
+  /** Записи, где отправки в ЕЦП не было вовсе (карта не выбрана и т. п.). */
+  ecpSkipped: number;
 }
 
 // ---------------------------------------------- сопоставление ИАС-4 ↔ ЕЦП

@@ -94,6 +94,8 @@ class LoadPrkResponse(BaseModel):
     result: Optional[ResultSchema] = None
     error_message: Optional[str] = None
     mis_save_result: Optional[dict] = None
+    # Почему отправки в ЕЦП не было, когда результата нет.
+    mis_skip_reason: Optional[str] = None
 
 
 class InsCheckRequest(BaseModel):
@@ -189,6 +191,11 @@ class PrkHistoryItem(BaseModel):
     timeoper: Optional[str] = None
     errors: list[dict] = []
     attachments: list[PrkHistoryAttachment] = []
+    # Без этих полей response_model отбрасывал результат отправки в ЕЦП, и
+    # интерфейс всегда показывал «ЕЦП не отправлено» — даже когда отправка
+    # прошла успешно.
+    misSave: Optional[dict] = None
+    misSkipReason: Optional[str] = None
 
 
 class PrkHistoryResponse(BaseModel):
@@ -213,3 +220,9 @@ class PrkStats(BaseModel):
     total: int
     success: int
     failed: int
+    # Счётчики ЕЦП вычислялись, но response_model их отбрасывал: на странице
+    # статистики они показывались пустыми.
+    ecpAttempted: int = 0
+    ecpSuccess: int = 0
+    ecpFailed: int = 0
+    ecpSkipped: int = 0

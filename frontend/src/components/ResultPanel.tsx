@@ -104,6 +104,15 @@ export default function ResultPanel({ response, spmoMap }: Props) {
           }
         </Alert>
       )}
+
+      {!response.mis_save_result && response.mis_skip_reason && (
+        <Alert severity="info" sx={{ mt: 2 }}>
+          <AlertTitle>В ЕЦП ничего не отправлялось</AlertTitle>
+          {response.mis_skip_reason === 'карта пациента в ЕЦП не выбрана'
+            ? 'Запись ушла в ИАС-4. Чтобы отправить данные в ЕЦП, найдите пациента в поиске ЕЦП и прикрепите приказ к выбранной карте.'
+            : `Запись не была обработана: ${response.mis_skip_reason}.`}
+        </Alert>
+      )}
     </>
   );
 }
