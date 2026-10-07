@@ -46,10 +46,19 @@ services:
     networks:
       - gateway_data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${GATEWAY_DB_USER:-mis_gateway} -d ${GATEWAY_DB_NAME:-mis_gateway}"]
+      # pg_isready успевает ещё во время инициализации, когда роль ещё не создана:
+      # шлюз стартует и падает с «password authentication failed». Поэтому
+      # проверяем не только то, что принимает соединения,, но и реальный вход под своим паролем.
+      test:
+        - "CMD-SHELL"
+        - >-
+          pg_isready -U ${GATEWAY_DB_USER:-mis_gateway} -d ${GATEWAY_DB_NAME:-mis_gateway}
+          && psql -U ${GATEWAY_DB_USER:-mis_gateway} -d ${GATEWAY_DB_NAME:-mis_gateway}
+             -c "SELECT 1" > /dev/null
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 10s
 
   gateway-redis:
     image: redis:7-alpine

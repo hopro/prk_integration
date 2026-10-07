@@ -20,6 +20,22 @@ check_filled "${POSTGRES_PASSWORD:-}" "GATEWAY_DB_PASSWORD"
 check_filled "${JWT_SECRET_KEY:-}" "JWT_SECRET_KEY"
 check_filled "${ADMIN_PASSWORD:-}" "GATEWAY_PASSWORD"
 
-alembic upgrade head
+# База может ещё дорабатывать инициализацию, даже если она уже принимает
+# соединения. Раньше миграция падала, контейнер уходил в перезапуск, а
+# `docker compose up` возвращал ошибку — хотя система поднималась через
+# несколько секунд сама. Теперь ждём базу сами и не пугаем администратора.
+attempt=1
+max_attempts=30
+until alembic upgrade head; do
+  if [ "$attempt" -ge "$max_attempts" ]; then
+    echo "ОШИБКА: база данных не ответила за $((max_attempts * 2)) с." >&2
+    echo "Проверьте docker compose logs gateway-postgres" >&2
+    echo "и что GATEWAY_DB_PASSWORD в .env совпадает с паролем базы." >&2
+    exit 1
+  fi
+  echo "База данных ещё не готова, попытка $attempt из $max_attempts…" >&2
+  attempt=$((attempt + 1))
+  sleep 2
+done
 
 exec uvicorn app.main:app --host ${APP_HOST:-0.0.0.0} --port ${APP_PORT:-8010}
