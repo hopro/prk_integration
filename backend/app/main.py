@@ -20,7 +20,12 @@ async def lifespan(app: FastAPI):
     # При старте один раз проверяем шлюз и пишем вердикт в лог. Раньше о том,
     # куда именно настроен MIS_GATEWAY_URL, можно было узнать только из
     # трассировки в момент ошибки.
-    from app.services import mis_client
+    from app.services import dict_db, mis_client
+
+    # Схема справочников готовится до первого запроса: добавление колонок
+    # должно доезжать до баз, созданных прошлой версией. Базы настроек и истории
+    # доводят схему сами при чтении.
+    dict_db.ensure_schema()
 
     logger.info("МИС-ШЛЮЗ настроен на %s", mis_client.MIS_GATEWAY_URL)
     try:
@@ -39,7 +44,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 logger = logging.getLogger(__name__)
 

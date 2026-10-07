@@ -3,6 +3,7 @@ import {
   Box, Paper, Typography, Button, Alert, CircularProgress,
   Table, TableHead, TableBody, TableRow, TableCell, TextField, Divider,
   Dialog, DialogTitle, DialogContent, DialogActions, Stack, Chip,
+  TablePagination,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloudSyncIcon from '@mui/icons-material/CloudSync';
@@ -11,7 +12,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import type { DictionaryItem, DictionaryLoadLog, DictionaryRow, DictionarySources } from '../types';
 import {
   fetchDictionaryStatus, fetchDictionaryLog, fetchDictionarySources, loadDictionary,
-  fetchRegions, fetchEntries, uploadDictionaryXml,
+  fetchRegions, fetchEntriesPage, uploadDictionaryXml,
 } from '../api/dictionaries';
 
 interface Props {
@@ -24,20 +25,23 @@ const KIND_LABELS: Record<Kind, string> = {
   regions: 'Участки ЛПУ',
   spmo: 'Медицинские организации',
   spsmo: 'Страховые компании',
-  spdiv: 'Подразделения МО (СПФМО)',
   spdept: 'Подразделения МО (справочник ИАС-4)',
 };
 
-/** Как загружается справочник. Других способов нет. */
-const KIND_SOURCE: Record<Kind, 'ecp' | 'tfoms' | 'file'> = {
+/**
+ * Как загружается справочник:
+ *   ecp   — только из ЕЦП, участки принадлежат конкретному ЛПУ;
+ *   tfoms — из XML-выгрузки в каталоге ./tfoms.
+ */
+const KIND_SOURCE: Record<Kind, 'ecp' | 'tfoms'> = {
   regions: 'ecp',
   spmo: 'tfoms',
   spsmo: 'tfoms',
-  spdiv: 'tfoms',
-  spdept: 'file',
+  spdept: 'tfoms',
 };
 
-const TFOMS_KINDS: Kind[] = ['spmo', 'spsmo', 'spdiv'];
+/** Справочники из XML-выгрузок, включая подразделения ИАС-4. */
+const TFOMS_KINDS: Kind[] = ['spdept', 'spmo', 'spsmo'];
 
 export default function DictionariesPage({ defaultLpuId }: Props) {
   const [items, setItems] = useState<DictionaryItem[]>([]);
@@ -55,6 +59,12 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
   const [rowsLoading, setRowsLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [uploadTarget, setUploadTarget] = useState<Kind | null>(null);
+
+  // Просмотр справочников постраничный: СПФМО — общероссийский список больше
+  // чем на 150 тысяч строк, и выгрузка его целиком вешает вкладку на минуты.
+  const PAGE = 200;
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -76,21 +86,41 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { setLpuId(defaultLpuId || '13003795'); }, [defaultLpuId]);
 
-  const openRows = useCallback(async (kind: Kind, scope: string) => {
-    setViewKind(kind);
+  const readPage = useCallback(async (kind: Kind, opts: {
+    scope?: string;
+    search?: string;
+    page?: number;
+  } = {}) => {
+    const pageNo = opts.page || 0;
     setRowsLoading(true);
-    setSearch('');
     try {
-      const data = kind === 'regions'
-        ? (await fetchRegions(scope)).items
-        : await fetchEntries(kind);
-      setRows(data);
+      if (kind === 'regions') {
+        const data = (await fetchRegions(opts.scope || lpuId)).items;
+        setRows(data);
+        setTotal(data.length);
+        return;
+      }
+      const data = await fetchEntriesPage(kind, {
+        scope: opts.scope || '',
+        search: opts.search || '',
+        limit: PAGE,
+        offset: pageNo * PAGE,
+      });
+      setRows(data.items);
+      setTotal(data.total);
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Не удалось прочитать справочник');
     } finally {
       setRowsLoading(false);
     }
-  }, []);
+  }, [lpuId]);
+
+  const openRows = useCallback(async (kind: Kind, scope: string) => {
+    setViewKind(kind);
+    setSearch('');
+    setPage(0);
+    await readPage(kind, { scope });
+  }, [readPage]);
 
   const handleLoad = async (kind: Kind, scope: string) => {
     setBusy(kind);
@@ -113,14 +143,13 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
 
   const applySearch = async () => {
     if (!viewKind || viewKind === 'regions') return;
-    setRowsLoading(true);
-    try {
-      setRows(await fetchEntries(viewKind, '', search));
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Не удалось найти записи');
-    } finally {
-      setRowsLoading(false);
-    }
+    setPage(0);
+    await readPage(viewKind, { search });
+  };
+
+  const changePage = (_event: unknown, value: number) => {
+    setPage(value);
+    if (viewKind) readPage(viewKind, { search, page: value });
   };
 
   const handleUpload = async (file: File) => {
@@ -154,16 +183,13 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
   const renderCard = (kind: Kind, scope: string, rows: number, loadedAt: string | null) => {
     const source = KIND_SOURCE[kind];
     const isEcp = source === 'ecp';
-    const isFileOnly = source === 'file';
     const file = fileOf(kind);
     return (
       <Paper key={`${kind}:${scope}`} variant="outlined" sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
         <Box>
           <Typography variant="subtitle2">{KIND_LABELS[kind]}</Typography>
           <Typography variant="caption" color="text.secondary">
-            {isEcp
-              ? `Lpu_id ${scope}`
-              : (file ? file.file : (isFileOnly ? 'файл не загружен' : 'выгрузка не найдена'))}
+            {isEcp ? `Lpu_id ${scope}` : (file ? file.file : 'выгрузка не найдена')}
           </Typography>
         </Box>
         <Box>
@@ -171,24 +197,12 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
             {rows ? rows.toLocaleString('ru-RU') : '—'}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            {rows
-              ? `записей · ${isEcp ? 'из ЕЦП' : (isFileOnly ? 'из файла ИАС-4' : 'из XML-выгрузки ТФОМС')}`
-              : 'не загружен'}
+            {rows ? `записей · ${isEcp ? 'из ЕЦП' : 'из XML-выгрузки'}` : 'не загружен'}
             {loadedAt ? ` · ${new Date(loadedAt.replace(' ', 'T')).toLocaleString('ru-RU')}` : ''}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          {isFileOnly ? (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={busy === kind ? <CircularProgress size={14} color="inherit" /> : <UploadFileIcon />}
-              disabled={busy !== null}
-              onClick={() => setUploadTarget(kind)}
-            >
-              Загрузить файл
-            </Button>
-          ) : isEcp ? (
+          {isEcp ? (
             <Button
               size="small"
               variant="contained"
@@ -228,15 +242,9 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
             Показать
           </Button>
         </Stack>
-        {!isEcp && !isFileOnly && !file && (
+        {!isEcp && !file && (
           <Typography variant="caption" color="error">
             Файл не найден в каталоге {sources?.directory}
-          </Typography>
-        )}
-        {isFileOnly && (
-          <Typography variant="caption" color="text.secondary">
-            Единственный источник кодов подразделений, которые ИАС-4 принимает в поле
-            podr. Подойдёт SPDEPT.xml, .zip или .csv с колонками кода и названия.
           </Typography>
         )}
       </Paper>
@@ -288,16 +296,8 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
           </Box>
 
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Подразделения МО — справочник ИАС-4 (только файл)
+            Справочники ТФОМС — только XML-выгрузки
           </Typography>
-          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: 'repeat(2, 1fr)' }} gap={2} sx={{ mb: 3 }}>
-            {(['spdept'] as Kind[]).map((kind) => {
-              const entry = items.find((i) => i.kind === kind);
-              return renderCard(kind, '', entry?.rows || 0, entry?.loadedAt || null);
-            })}
-          </Box>
-
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>Справочники ТФОМС — только XML-выгрузки</Typography>
           <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: 'repeat(3, 1fr)' }} gap={2} sx={{ mb: 3 }}>
             {TFOMS_KINDS.map((kind) => {
               const entry = items.find((i) => i.kind === kind);
@@ -369,6 +369,7 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
               Найти
             </Button>
           </Box>
+
           {rowsLoading ? (
             <Box display="flex" justifyContent="center" sx={{ py: 3 }}><CircularProgress /></Box>
           ) : !rows.length ? (
@@ -406,6 +407,26 @@ export default function DictionariesPage({ defaultLpuId }: Props) {
                 ))}
               </TableBody>
             </Table>
+          )}
+          {viewKind && viewKind !== 'regions' && total > PAGE && (
+            <TablePagination
+              component="div"
+              count={total}
+              page={page}
+              onPageChange={changePage}
+              rowsPerPage={PAGE}
+              rowsPerPageOptions={[PAGE]}
+              labelRowsPerPage="Записей на странице"
+              labelDisplayedRows={({ from, to, count }) => `${from}\u2013${to} из ${count}`}
+              sx={{ mt: 1 }}
+            />
+          )}
+          {viewKind && viewKind !== 'regions' && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              Показано {rows.length} из {total.toLocaleString('ru-RU')} записей. Справочник
+              большой, поэтому выдаётся постранично: ищите по названию или отберите вид
+              подразделения.
+            </Typography>
           )}
         </DialogContent>
         <DialogActions>

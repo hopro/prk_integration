@@ -16,7 +16,7 @@ from app.schemas import (
     PrkStats,
 )
 from app.services.soap_client import send_load_prk
-from app.services import prk_db, mis_client, settings_db, dict_db, region_match
+from app.services import prk_db, mis_client, settings_db, dict_db, region_match, region_links
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,9 @@ async def load_prk(request: LoadPrkRequest):
                 regions_resp = await mis_client.get_regions_id({"Lpu_id": mis_lpu_id, "isClose": "1"})
                 regions = _unwrap_regions(regions_resp)
 
-            region, how = region_match.match_region(regions, podr)
+            # Ручная привязка важнее автоподбора: у ЕЦП и ИАС-4 разные
+            # нумерации, и угадывать соответствие по названию ненадёжно.
+            region, how = region_links.resolve(mis_lpu_id, podr, regions)
             if region is not None:
                 logger.info("Attachment podr=%s matched region %s (%s)", podr,
                             region_match.region_value(region), how)
@@ -82,7 +84,7 @@ async def load_prk(request: LoadPrkRequest):
             else:
                 mis_save_result = {
                     "success": False,
-                    "error": region_match.diagnose(regions, podr, mis_lpu_id),
+                    "error": region_links.diagnose(mis_lpu_id, podr, regions),
                 }
         except Exception as e:
             logger.exception("MIS save-person-card failed")

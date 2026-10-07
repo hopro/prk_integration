@@ -1,8 +1,9 @@
+import datetime
 import logging
 
 from fastapi import APIRouter
 
-from app.services import dict_db, region_match, settings_db
+from app.services import dict_db, region_links, settings_db
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,16 @@ async def spdept_list(lpuId: str = "", mo: str = "", search: str = ""):
     Участки ЕЦП используются отдельно — при сопоставлении кода с участком при
     сохранении карты в ЕЦП.
     """
-    rows = dict_db.get_entries("spdept", mo)
-    if not rows:
-        rows = dict_db.get_entries("spdept", "")
+    # Коды берём у подразделений того МО, который указан в настройках, и только
+    # те, что действуют на сегодня: в выгрузке ИАС-4 закрытые подразделения тоже
+    # лежат (у МО 893 из 93 актуальны 79), а ИАС-4 их больше не принимает.
+    today = datetime.date.today().isoformat()
+    mo_code = mo.strip() or (settings_db.get_settings().get("defaultMo") or "").strip().lstrip("0")
+    all_of_mo = dict_db.get_entries("spdept", mo_code)
+    rows = [r for r in all_of_mo if r.get("valid_until") in ("", "9999-12-31") or r["valid_until"] >= today]
+    if not rows and all_of_mo:
+        # Ничего актуального не нашлось — показываем все, иначе форма будет пустой.
+        rows = all_of_mo
 
     if search:
         needle = search.lower()
@@ -57,7 +65,10 @@ async def spdept_list(lpuId: str = "", mo: str = "", search: str = ""):
     payload = {
         "spdept": [{"code": r["code"], "name": r["name"]} for r in rows],
         "source": "ias" if rows else "not_loaded",
-        "mo": mo,
+        "mo": mo_code,
+        "total": len(all_of_mo),
+        "actual": len(rows),
+        "expired": len(all_of_mo) - len(rows),
     }
     if not rows:
         payload["hint"] = (
@@ -71,29 +82,13 @@ async def spdept_list(lpuId: str = "", mo: str = "", search: str = ""):
 
 @router.get("/dict/spdept/coverage")
 async def spdept_coverage(lpuId: str = ""):
-    """Сколько подразделений ИАС-4 найдётся среди участков ЕЦП.
+    """Сколько подразделений ИАС-4 привязано к участкам ЕЦП.
 
-    Показывает, насколько выбранный справочник подразделений совпадает с
-    участками ЕЦП: подразделение без участка нельзя прикрепить к ЛПУ в ЕЦП.
+    Считается тем же кодом, что и страница «Сопоставление участков», чтобы
+    два ответа об одном и том же не расходились.
     """
     lpu_id = lpuId or settings_db.get_settings().get("misLpuId", "")
     regions = dict_db.get_regions(lpu_id)
-    ia_regions = {region_match.region_code(r["name"]): r for r in regions}
-    ia_regions = {c: r for c, r in ia_regions.items() if c}
-
-    matched, missing = [], []
-    for entry in dict_db.get_entries("spdept"):
-        code = entry["code"]
-        if code in ia_regions:
-            matched.append({"code": code, "name": entry["name"], "region": ia_regions[code]["name"]})
-        else:
-            missing.append({"code": code, "name": entry["name"]})
-
-    return {
-        "lpuId": lpu_id,
-        "regions": len(regions),
-        "ias": len(dict_db.get_entries("spdept")),
-        "matched": len(matched),
-        "missing": missing[:200],
-        "matchedSample": matched[:20],
-    }
+    ias = dict_db.get_entries("spdept")
+    matrix = region_links.build_matrix(lpu_id, regions, ias)
+    return {"lpuId": lpu_id, **matrix["summary"]}

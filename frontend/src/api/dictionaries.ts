@@ -1,5 +1,13 @@
 import axios from 'axios';
-import type { DictionaryItem, DictionaryLoadLog, DictionaryRow, DictionarySources } from '../types';
+import type {
+  DictionaryItem,
+  DictionaryLoadLog,
+  DictionaryRow,
+  DictionarySources,
+  RegionLinkRow,
+  RegionLinksMatrix,
+  RegionLinkSuggestion,
+} from '../types';
 
 const client = axios.create({
   baseURL: '/api/dictionaries',
@@ -58,17 +66,33 @@ export async function fetchRegionsForPatient(
   return { regions: (live || []) as DictionaryRow[], source: 'ecp' };
 }
 
+/**
+ * Страница справочника. Выдаём порциями: полная выгрузка в таблицу браузера
+ * мешает, а ответ несёт общее число записей для счётчика и пагинации.
+ */
+export async function fetchEntriesPage(
+  kind: string,
+  options: { scope?: string; search?: string; limit?: number; offset?: number } = {},
+): Promise<{ items: DictionaryRow[]; total: number; truncated: boolean }> {
+  const response = await client.get<{
+    items: DictionaryRow[];
+    total: number;
+    truncated: boolean;
+  }>('/entries', {
+    params: { kind, limit: options.limit ?? 200, offset: options.offset ?? 0, ...options },
+  });
+  return response.data;
+}
+
 export async function fetchEntries(
   kind: string,
   scope = '',
   search = '',
-  limit = 0,
+  limit = 200,
 ): Promise<DictionaryRow[]> {
-  const response = await client.get<{ items: DictionaryRow[] }>('/entries', {
-    params: { kind, scope, search, limit },
-  });
-  return response.data.items;
+  return (await fetchEntriesPage(kind, { scope, search, limit })).items;
 }
+
 
 /**
  * Загрузка XML-выгрузки ТФОМС файлом. Только zip/xml: CSV-импорт справочников
@@ -84,6 +108,53 @@ export async function uploadDictionaryXml(
   const response = await client.post<{ kind: string; rows: number; source: string; entry?: string }>(
     '/upload',
     form,
+  );
+  return response.data;
+}
+
+// ------------------------------------------ сопоставление подразделений и участков
+
+export async function fetchRegionLinks(lpuId: string): Promise<RegionLinksMatrix> {
+  const response = await client.get<RegionLinksMatrix>('/region-links', { params: { lpuId } });
+  return response.data;
+}
+
+export async function saveRegionLink(
+  podr: string,
+  regionId: string,
+  lpuId = '',
+): Promise<{ linked: boolean; regionId: string }> {
+  const response = await client.post<{ linked: boolean; regionId: string }>('/region-links', {
+    podr,
+    regionId,
+    lpuId,
+  });
+  return response.data;
+}
+
+/** Полностью убирает привязку: код снова попадёт в автоподбор. */
+export async function forgetRegionLink(podr: string, lpuId = ''): Promise<{ removed: boolean }> {
+  const response = await client.post<{ removed: boolean }>('/region-links/forget', { podr, lpuId });
+  return response.data;
+}
+
+export async function fetchRegionLinkSuggestions(
+  lpuId: string,
+): Promise<{ items: RegionLinkSuggestion[]; total: number }> {
+  const response = await client.get<{ items: RegionLinkSuggestion[]; total: number }>(
+    '/region-links/suggest',
+    { params: { lpuId } },
+  );
+  return response.data;
+}
+
+export async function applyRegionLinkSuggestions(
+  links: RegionLinkSuggestion[],
+  lpuId = '',
+): Promise<{ applied: number; rejected: number }> {
+  const response = await client.post<{ applied: number; rejected: number }>(
+    '/region-links/apply',
+    { links, lpuId },
   );
   return response.data;
 }

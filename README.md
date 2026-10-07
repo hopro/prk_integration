@@ -10,7 +10,7 @@ Frontend (React + MUI)  ──HTTP──▶  Backend (FastAPI)  ──SOAP──
                                ├──▶ Шлюз ЕЦП ──▶ ЕЦП (participant card)
                                └──▶ SQLite + файлы справочников
                                      settings.db, dictionaries.db, prk_history.db
-                                     tfoms/SPMO.zip, SPSMO.zip, SPFMODIVISION.zip, SPDEPT.xml
+                                     tfoms/SPMO.zip, SPSMO.zip, SPDEPT.xml
 ```
 
 ## Развёртывание и обновление
@@ -62,6 +62,12 @@ docker compose up -d --build
 ### Проверка полиса
 Онлайн-проверка страховой принадлежности и прикрепления через SOAP-сервис GetInsPrkState.
 
+### Сопоставление участков
+Связка кодов подразделений ИАС-4 с участками ЕЦП. Нужна потому, что нумерация
+у них разная: автоматически совпадают единицы из десятков, остальное проставляет
+администратор вручную. Подробности — в
+[deploy/dictionaries/README.md](deploy/dictionaries/README.md).
+
 ## Авторизация ИАС-4
 
 Учётные данные для доступа к внешнему SOAP-сервису (ИАС-4) вводятся через диалог «Настройки» (иконка шестерёнки в шапке приложения).
@@ -87,7 +93,6 @@ docker compose up -d --build
 | Подразделения МО | `SPDEPT.xml` (`.zip`/`.csv`) | код `podr` в форме прикрепления |
 | Медицинские организации | `SPMO.zip` | выбор МО |
 | Страховые компании | `SPSMO.zip` | выбор СМО |
-| Подразделения МО (СПФМО) | `SPFMODIVISION.zip` | названия подразделений |
 
 ### Почему для `podr` нужен отдельный справочник ИАС-4
 
@@ -164,7 +169,11 @@ SOAP_URL=http://10.0.100.5/IASWeb/LoadPrkTest/LoadPrk.asmx
 |-------|----------|----------|
 | GET | `/api/dict` | МО и СМО |
 | GET | `/api/dict/spdept?mo=893` | Подразделения ИАС-4 для поля `podr` |
-| GET | `/api/dict/spdept/coverage` | Покрытие: подразделения ИАС-4 против участков ЕЦП |
+| GET | `/api/dict/spdept/coverage` | Сколько подразделений привязано к участкам ЕЦП |
+| GET | `/api/dictionaries/region-links` | Таблица сопоставления подразделений и участков |
+| POST | `/api/dictionaries/region-links` | Привязать или отвязать код подразделения |
+| GET | `/api/dictionaries/region-links/suggest` | Предложения автоматического подбора |
+| POST | `/api/dictionaries/region-links/apply` | Применить автоматический подбор |
 | GET | `/api/dictionaries/status` | Состояние справочников |
 | POST | `/api/dictionaries/load` | Загрузить: участки из ЕЦП или файл ТФОМС |
 | POST | `/api/dictionaries/upload` | Загрузить файл справочника |

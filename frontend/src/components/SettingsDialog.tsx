@@ -198,7 +198,7 @@ export default function SettingsDialog({ open, settings, onSave, onClose }: Prop
           value={tfomsEncoding}
           onChange={(e) => setTfomsEncoding(e.target.value)}
           margin="normal"
-          helperText="SPSMO.zip, SPMO.zip, SPFMODIVISION.zip обычно приходят в windows-1251"
+          helperText="SPSMO.zip, SPMO.zip, SPDEPT.xml обычно приходят в windows-1251"
         />
         <Typography variant="caption" color="text.secondary">
           Адреса можно менять на месте. Если поле оставить пустым, будет использовано

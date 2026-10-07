@@ -9,6 +9,7 @@ import InsCheckPage from './components/InsCheckPage';
 import StatsPage from './components/StatsPage';
 import SettingsDialog from './components/SettingsDialog';
 import DictionariesPage from './components/DictionariesPage';
+import RegionLinksPage from './components/RegionLinksPage';
 import { fetchDict } from './api/spmo';
 import { fetchSettings, saveSettings, updateMisCredentials, updateMisConfig } from './api/settings';
 import type { SettingsData } from './types';
@@ -139,13 +140,15 @@ export default function App() {
         <Tab label="Прикрепление ЗЛ" />
         <Tab label="Проверка полиса" />
         <Tab label="Справочники" />
+        <Tab label="Сопоставление участков" />
         <Tab label="Статистика" />
       </Tabs>
 
       {tab === 0 && <LoadPrkPage settings={settings} spmoMap={spmoMap} spsmoMap={spsmoMap} />}
       {tab === 1 && <InsCheckPage settings={settings} spmoMap={spmoMap} spsmoMap={spsmoMap} />}
       {tab === 2 && <DictionariesPage defaultLpuId={settings.misLpuId} />}
-      {tab === 3 && <StatsPage spmoMap={spmoMap} />}
+      {tab === 3 && <RegionLinksPage lpuId={settings.misLpuId} />}
+      {tab === 4 && <StatsPage spmoMap={spmoMap} />}
 
       <SettingsDialog
         open={settingsOpen}

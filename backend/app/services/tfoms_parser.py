@@ -6,10 +6,9 @@
 Поддерживаются выгрузки:
   SPSMO.zip        — страховые компании (СМО),   атрибуты CODE, NAME, MAIL
   SPMO.zip         — медицинские организации,     атрибуты CODE, NAME, TERR, …
-  SPFMODIVISION.zip — подразделения МО (общероссийский список, без привязки к МО)
   SPDEPT.xml/.zip  — подразделения ИАС-4: коды, которые ИАС принимает в podr
 
-Файлы большие (SPFMODIVISION — около 50 МБ, 160 тыс. записей), поэтому парсинг
+Файлы бывают большими, поэтому парсинг
 идёт потоково, без построения дерева целиком.
 """
 
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 KINDS = {
     "spsmo": "Страховые компании (СМО)",
     "spmo": "Медицинские организации (СПМО)",
-    "spdiv": "Подразделения МО (СПФМО-подразделения)",
     "spdept": "Подразделения МО (справочник ИАС-4)",
 }
 
@@ -35,7 +33,6 @@ KINDS = {
 FILE_MARKERS = {
     "spsmo": ("spsmo",),
     "spmo": ("spmo",),
-    "spdiv": ("spfmodivision",),
     "spdept": ("spdept", "spmo_div", "podrazd"),
 }
 
@@ -44,20 +41,31 @@ DEFAULT_ENCODINGS = ("cp1251", "windows-1251", "utf-8")
 _CODE_RE = re.compile(r"^(\d+)")
 
 
-def detect_kind(filename: str, xml_text_head: str) -> str | None:
-    """Определяет вид справочника по имени файла и содержимому."""
+def detect_kind(filename: str, xml_text_head: str) -> str:
+    """Определяет вид справочника по имени файла, затем по содержимому.
+
+    Имя надёжнее содержимого: в выгрузке СПМО много полей, и подразделения
+    ИАС-4 легко спутать с медицинскими организациями.
+    """
     lowered = filename.lower()
     for kind, markers in FILE_MARKERS.items():
         if any(marker in lowered for marker in markers):
             return kind
-    # SPFMODIVISION содержит SPMO как подстроку, поэтому проверяем порядок.
-    if "spfmodivision" in lowered:
-        return "spdiv"
-    if "spmo" in xml_text_head.lower() or "nam_spmo" in xml_text_head.lower():
-        return "spdiv" if "nam_spmo" in xml_text_head.lower() else "spmo"
-    if "spsmo" in xml_text_head.lower():
+
+    # По содержимему смотрим первую запись: в выгрузке СПМО много похожих
+    # полей, и без разбора атрибутов подразделение ИАС-4 не отличить от МО.
+    keys: set[str] = set()
+    for match in re.finditer(r"<REC\s+([^>]+)", xml_text_head or "", re.IGNORECASE):
+        keys = {k.upper() for k in re.findall(r"(\w+)\s*=", match.group(1))}
+        break
+
+    if keys and any(f in keys for f in _IAS_CODE_FIELDS) and not (
+        "NAM_SPMO" in keys or "TERR" in keys or "MAIL" in keys
+    ):
+        return "spdept"
+    if "MAIL" in keys and "TERR" not in keys:
         return "spsmo"
-    return None
+    return "spmo"
 
 
 _DECL_ENCODING_RE = re.compile(rb"encoding\s*=\s*['\"]([\w-]+)['\"]")
@@ -169,31 +177,11 @@ def parse_spmo(xml_text: str) -> list[dict]:
     return _merge_by_code(_iter_records(xml_text), extra_of)
 
 
-def parse_spdiv(xml_text: str) -> list[dict]:
-    """Подразделения МО. В выгрузке нет кода МО — храним всё, поиск по названию.
-
-    Возвращаем также вид подразделения (VID_SPMO): без него список из 160 тыс.
-    записей нечем различать.
-    """
-    rows = []
-    for attrs in _iter_records(xml_text):
-        name = (attrs.get("NAM_SK_SPMO") or attrs.get("NAM_SPMO") or "").strip()
-        if not name:
-            continue
-        rows.append({
-            "code": (attrs.get("IDSPMO") or "").strip(),
-            "name": name,
-            "extra": " · ".join(filter(None, [
-                (attrs.get("VID_SPMO") or "").strip(),
-                (attrs.get("DATEBEG") or "") and f"с {attrs['DATEBEG'].strip()}",
-            ])),
-        })
-    return rows
-
-
 # Имена полей для справочника подразделений ИАС-4. Формат выгрузки заказчика
 # неизвестен заранее, поэтому принимаем распространённые варианты написания.
-_IAS_CODE_FIELDS = ("CODE", "PODR", "PODR_CODE", "PODRCD", "ID", "KOD", "CODEPODR")
+# PODR идёт первым: в выгрузке ИАС-4 есть ещё и CODE — это номер подразделения
+# внутри МО («14»), а не код, который принимает ИАС-4 («31400»).
+_IAS_CODE_FIELDS = ("PODR", "PODR_CODE", "PODRCD", "CODE", "ID", "KOD")
 _IAS_NAME_FIELDS = ("NAME", "PODRNAME", "NAMEPODR", "NAME_PODR", "TITLE", "NAIMENOVANIE")
 _IAS_MO_FIELDS = ("MO", "MO_CODE", "CODE_MO", "KODMO", "LPU")
 
@@ -216,11 +204,6 @@ def parse_spdept(xml_text: str) -> list[dict]:
                 break
         if not code:
             continue
-        name = ""
-        for field in _IAS_NAME_FIELDS:
-            if (keys.get(field) or "").strip():
-                name = keys[field].strip()
-                break
         mo = ""
         for field in _IAS_MO_FIELDS:
             if (keys.get(field) or "").strip():
@@ -230,18 +213,59 @@ def parse_spdept(xml_text: str) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
+
+        # Короткое и полное названия есть по-разному: LONGNAME подробнее
+        # («Терапевтический участок №6» против «Участок №6»), и именно оно
+        # ближе к тому, как участок назван в ЕЦП.
+        short = ""
+        for field in _IAS_NAME_FIELDS:
+            if (keys.get(field) or "").strip():
+                short = keys[field].strip()
+                break
+        long_name = (keys.get("LONGNAME") or "").strip()
+        name = long_name or short or code
+
+        # DEND — до какой даты подразделение действует. По нему отсекаются
+        # закрытые подразделения, которых в справочнике большинство.
+        valid_until = _parse_date(keys.get("DEND") or keys.get("DATEEND") or "")
+
+        # PRKYES — тот самый признак «разрешено прикрепление», на который ИАС-4
+        # отвечает ошибкой 502.
+        prkyes = (keys.get("PRKYES") or "").strip()
+        allow = "" if prkyes in ("", "0") else " · прикрепление разрешено"
+
         rows.append({
             "code": code,
-            "name": name or code,
-            "extra": f"МО {mo}" if mo else "",
+            "name": name,
+            "scope": mo,                       # область = код МО
+            "extra": f"КОД {code}" + (f" · {short}" if short and short != name else "") + allow,
+            "valid_until": valid_until,
         })
     return rows
+
+
+def _parse_date(value: str) -> str:
+    """Дата из выгрузки (ДД.ММ.ГГГГ) в виде ГГГГ-ММ-ДД.
+
+    Пустая дата означает, что подразделение не ограничено сроком: 31.12.2999 в
+    выгрузке — это открытый период.
+    """
+    text = (value or "").strip()
+    match = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", text)
+    if not match:
+        return ""
+    day, month, year = match.groups()
+    if year == "2999":
+        return "9999-12-31"
+    try:
+        return f"{year}-{month}-{day}"
+    except ValueError:
+        return ""
 
 
 PARSERS = {
     "spsmo": parse_spsmo,
     "spmo": parse_spmo,
-    "spdiv": parse_spdiv,
     "spdept": parse_spdept,
 }
 
@@ -263,8 +287,6 @@ def parse_upload(filename: str, raw: bytes, encoding_hint: str = "") -> tuple[st
                 "NAM_SPMO" in keys or "TERR" in keys or "MAIL" in keys
             ):
                 kind = "spdept"
-            elif "NAM_SPMO" in keys or "NAM_SK_SPMO" in keys:
-                kind = "spdiv"
             elif "MAIL" in keys and "TERR" not in keys:
                 kind = "spsmo"
             elif "TERR" in keys or "OGRN" in keys:
@@ -273,7 +295,7 @@ def parse_upload(filename: str, raw: bytes, encoding_hint: str = "") -> tuple[st
     if kind is None:
         raise ValueError(
             "Не удалось определить вид справочника. Ожидается SPSMO.zip, "
-            "SPMO.zip или SPFMODIVISION.zip"
+            "SPMO.zip или SPDEPT.xml"
         )
 
     rows = PARSERS[kind](text)

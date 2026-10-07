@@ -29,7 +29,7 @@ export interface SettingsData {
 }
 
 export interface DictionaryItem {
-  kind: 'regions' | 'spmo' | 'spsmo' | 'spdiv' | 'spdept';
+  kind: 'regions' | 'spmo' | 'spsmo' | 'spdept';
   title: string;
   /** Область действия: Lpu_id для участков, код МО для подразделений. */
   scope: string;
@@ -287,4 +287,63 @@ export interface PrkStats {
   ecpAttempted: number;
   ecpSuccess: number;
   ecpFailed: number;
+}
+
+// ---------------------------------------------- сопоставление ИАС-4 ↔ ЕЦП
+
+/** Строка таблицы сопоставления: код подразделения ИАС-4 и участок ЕЦП. */
+export interface RegionLinkRow {
+  podr: string;
+  name: string;
+  regionId: string;
+  regionName: string;
+  /** Описание участка из ЕЦП (LpuRegion_Descr). */
+  regionDescr?: string;
+  source: '' | 'manual' | 'auto' | 'unlinked';
+  updatedAt: string;
+  how: string;
+  linked: boolean;
+  /** Действует ли подразделение на сегодня (DEND в справочнике ИАС-4). */
+  actual: boolean;
+  validUntil: string;
+}
+
+/** Участок ЕЦП, к которому ещё ничего не привязано. */
+export interface FreeRegion {
+  regionId: string;
+  name: string;
+  descr: string;
+  /** Код подразделения ИАС-4, которому этот участок подходит по автоподбору. */
+  linkedBy: string;
+}
+
+export interface RegionLinksMatrix {
+  lpuId: string;
+  rows: RegionLinkRow[];
+  freeRegions: FreeRegion[];
+  summary: {
+    ias: number;
+    linked: number;
+    manual: number;
+    unlinked: number;
+    unresolved: number;
+    broken: number;
+    regions: number;
+    regionsUsed: number;
+    regionsFree: number;
+    expired: number;
+    linkedExpired: number;
+  };
+  regionsLoaded: boolean;
+  iasLoaded: boolean;
+  hint?: string;
+}
+
+export interface RegionLinkSuggestion {
+  podr: string;
+  name: string;
+  region_id: string;
+  region_name: string;
+  how: string;
+  source: string;
 }

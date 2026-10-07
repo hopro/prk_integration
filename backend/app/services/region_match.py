@@ -57,6 +57,16 @@ def region_id(region: dict) -> str:
     return str(region.get("region_id") or region.get("LpuRegion_id") or "").strip()
 
 
+def region_descr(region: dict) -> str:
+    """Описание участка из ЕЦП (`LpuRegion_Descr`).
+
+    Часто полезнее имени: участок с именем «20100» описывается как
+    «Терапевтический участок 1», и по описанию он находится в справочнике
+    подразделений ИАС-4, где подразделение названо словами, а не кодом.
+    """
+    return (region.get("descr") or region.get("LpuRegion_Descr") or "").strip()
+
+
 def region_code(value: str) -> str | None:
     """Код участка, который ИАС-4 присылает в поле podr.
 
@@ -111,7 +121,18 @@ def match_region(regions: list[dict], podr: str) -> tuple[dict | None, str]:
                 if normalize(region_value(region)) == tail:
                     return region, "хвост кода без ведущих нулей"
 
-    # 4. Совпадение по вхождению — только для текстовых названий. Для чистых
+    # 4. То же самое по описанию участка: имя в ЕЦП бывает кодом, а смысл
+    #    подразделения живёт в описании.
+    wanted_descr = normalize(target)
+    for region in regions:
+        if region_descr(region) == target:
+            return region, "описание участка"
+    for region in regions:
+        value = normalize(region_descr(region))
+        if value and value == wanted_descr:
+            return region, "нормализованное описание участка"
+
+    # 5. Совпадение по вхождению — только для текстовых названий. Для чистых
     #    кодов это даёт ложные срабатывания: «530200» входит в «30200».
     is_code = wanted.isdigit()
     if wanted and not is_code:
@@ -120,6 +141,11 @@ def match_region(regions: list[dict], podr: str) -> tuple[dict | None, str]:
             if value and (value in wanted or wanted in value):
                 logger.info("Region %s matched by containment", region_value(region))
                 return region, "вхождение"
+        for region in regions:
+            value = normalize(region_descr(region))
+            if value and (value in wanted or wanted in value):
+                logger.info("Region %s matched by descr containment", region_value(region))
+                return region, "вхождение в описании"
 
     return None, "не найдено"
 
@@ -140,14 +166,20 @@ def diagnose(regions: list[dict], podr: str, lpu_id: str) -> str:
     close = []
     if wanted:
         for region in regions:
-            value = normalize(region_value(region))
-            if value and (value in wanted or wanted in value):
-                close.append(region_value(region))
+            for value in (region_value(region), region_descr(region)):
+                value = normalize(value)
+                if value and (value in wanted or wanted in value):
+                    label = region_value(region)
+                    descr = region_descr(region)
+                    text = f"{label} ({descr})" if descr and descr != label else label
+                    if text not in close:
+                        close.append(text)
 
     hint = (
         f"Ближайшие по названию: {', '.join(close[:5])}."
         if close else
-        f"Ни одного участка, похожего на «{target}»."
+        f"Ни одного участка, похожего на «{target}». Посмотрите, как этот код "
+        "назван в справочнике ИАС-4, и привяжите его на странице «Сопоставление участков»."
     )
     return (
         f"Подразделение «{target}» отсутствует среди {total} участков ЛПУ {lpu_id}. {hint}"
